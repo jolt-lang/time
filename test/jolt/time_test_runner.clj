@@ -6,10 +6,10 @@
             [jolt.time]))
 
 (def suites
-  '[tick.api-test
-    tick.internals-test
-    tick.addon-libs-test
-    tick.alpha.interval-test])
+  '[jolt.time.impl-test jolt.time.enums-test jolt.time.local-test jolt.time.amount-test
+    jolt.time.year-test jolt.time.temporal-test jolt.time.instant-test jolt.time.zones-test
+    jolt.time.zoned-test jolt.time.fmt-test jolt.time.corpus-test
+    tick.api-test tick.internals-test tick.addon-libs-test tick.alpha.interval-test])
 
 (defn -main [& _]
   (let [loaded (reduce (fn [acc ns-sym]

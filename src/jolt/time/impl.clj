@@ -105,14 +105,14 @@
   (__register-instance-check!
    (fn [class-name v]
      (when (jt? v)
-       (boolean (contains? (:classes (spec-of v)) class-name)))))
+       (boolean (or (contains? (:classes (spec-of v)) class-name) (contains? #{"java.io.Serializable" "Serializable"} class-name))))))
   ;; (class x)/(type x) and — crucially — protocol dispatch on these values, which
   ;; keys on value-host-tags. Without this a value's class is :object and
   ;; (extend-protocol P java.time.X …) never fires (tick extends its protocols this way).
   (__register-class!
    jt?
    (fn [x] (get type->class (type-of x) "java.lang.Object"))
-   (fn [x] (vec (:classes (spec-of x))))))
+   (fn [x] (conj (vec (:classes (spec-of x))) "java.io.Serializable" "Serializable"))))
 
 (def ^:private type->class
   {:jolt.time/month "java.time.Month" :jolt.time/day-of-week "java.time.DayOfWeek"

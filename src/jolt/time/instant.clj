@@ -60,6 +60,7 @@
    :classes #{"java.time.Instant" "Instant"
               "java.time.temporal.Temporal" "Temporal"
               "java.time.temporal.TemporalAccessor" "TemporalAccessor"
+              "java.time.temporal.TemporalAdjuster" "TemporalAdjuster"
               "java.lang.Comparable" "Comparable"}})
 
 (__register-class-methods! :jolt.time/instant
@@ -88,6 +89,10 @@
    "ofEpochSecond" (fn ([s] (instant (* (u/->long s) nps)))
                        ([s nano] (instant (+ (* (u/->long s) nps) (u/->long nano)))))
    "parse"        (fn [s & _] (instant (parse-iso-instant (str s))))
+   "from"         (fn [t] (condp = (impl/type-of t)
+                            :jolt.time/instant t
+                            :jolt.time/local-date-time (instant (* (l/ldt->ms t) 1000000))
+                            (instant (* (a/temporal-nanos t) 1) )))
    "EPOCH"        (instant 0)
    "MIN"          (instant (* (impl/days-from-civil -999999999 1 1) 86400 nps))
    "MAX"          (instant (+ (* (impl/days-from-civil 999999999 12 31) 86400 nps) (* 86399 nps) 999999999))})

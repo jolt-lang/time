@@ -36,6 +36,11 @@
                    (let [[y mo d] (civil-from-days ed)]
                      [y mo d (l/lt-hour nod) (l/lt-minute nod) (l/lt-second nod) (l/lt-nano nod)
                       (inc (u/floor-mod (+ ed 3) 7)) off zid]))]
+    (if (and (not tk) (instance? java.util.Date v))
+      ;; the #inst/Date layer's value (UTC), so its .format renders like an instant
+      (let [ms (.getTime v) secs (u/floor-div ms 1000)
+            ed (u/floor-div secs 86400) nod (* (u/floor-mod secs 86400) u/nanos-per-sec)]
+        (from-ldt ed nod 0 nil))
     (condp = tk
       :jolt.time/local-date (from-ldt (l/ld-epoch-day v) 0 0 nil)
       :jolt.time/local-time (let [nod (l/lt-nano-of-day v)] [1970 1 1 (l/lt-hour nod) (l/lt-minute nod) (l/lt-second nod) (l/lt-nano nod) 4 0 nil])
@@ -45,7 +50,7 @@
       :jolt.time/zoned-date-time (from-ldt (impl/field v :ed) (impl/field v :nod) (impl/field v :off) (z/zid-id (impl/field v :zid)))
       :jolt.time/offset-date-time (from-ldt (impl/field v :ed) (impl/field v :nod) (impl/field v :off) nil)
       :jolt.time/offset-time (let [nod (impl/field v :nod)] [1970 1 1 (l/lt-hour nod) (l/lt-minute nod) (l/lt-second nod) (l/lt-nano nod) 4 (impl/field v :off) nil])
-      nil)))
+      nil))))
 
 (defn- off-iso [secs colon allow-z]
   (if (and allow-z (zero? secs)) "Z"
@@ -112,7 +117,9 @@
   {"format" (fn [self v] (format-pattern (fmt-pattern self) v (fmt-locale self)))
    "withLocale" (fn [self l] (formatter (fmt-pattern self) (locale-id l)))
    "withZone" (fn [self _z] self)
-   "parse" (fn [self s] (inst/instant (inst/parse-iso-instant (str s))))
+   "parse" (fn [self s] (let [f (parse-with-pattern (fmt-pattern self) (str s))]
+                          (l/local-dt (days-from-civil (:year f) (:month f) (:day f))
+                                      (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f)))))
    "toString" fmt-pattern})
 
 ;; register .format on every temporal
@@ -123,7 +130,8 @@
 ;; java.util.Locale, java.time.format.FormatStyle
 (statics! ["Locale" "java.util.Locale"]
   {"ENGLISH" (impl/value :jolt.time/locale {:id "en"}) "US" (impl/value :jolt.time/locale {:id "en"})
-   "FRENCH" (impl/value :jolt.time/locale {:id "fr"}) "GERMAN" (impl/value :jolt.time/locale {:id "de"})})
+   "FRENCH" (impl/value :jolt.time/locale {:id "fr"}) "GERMAN" (impl/value :jolt.time/locale {:id "de"})
+   "forLanguageTag" (fn [tag] (impl/value :jolt.time/locale {:id (str tag)}))})
 (__register-class-ctor! "Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
 (__register-class-ctor! "java.util.Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
 (impl/register-type! :jolt.time/locale
@@ -198,7 +206,14 @@
               (= c \d) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :day v)))
               (= c \H) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :hour v)))
               (= c \m) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :min v)))
-              (= c \s) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :sec v)))
+              (= c \s) (let [[v si'] (digits si 2)
+                             ;; ISO patterns (…ss XXX) don't spell out the fraction; consume an
+                             ;; optional ".fffffffff" so 10:59:13.417Z keeps its millis.
+                             [nano si2] (if (and (< si' sl) (= \. (nth s si')))
+                                          (let [[fv fend] (digits (inc si') 9)]
+                                            [(* fv (u/pow10 (max 0 (- 9 (dec (- fend si')))))) fend])
+                                          [(:nano f) si'])]
+                         (recur (+ i k) si2 (assoc f :sec v :nano nano)))
               (= c \S) (let [[v si'] (digits si k)] (recur (+ i k) si' (assoc f :nano (* v (u/pow10 (max 0 (- 9 k)))))))
               (or (= c \V) (= c \X) (= c \Z) (= c \z))
                 (if (and (< si sl) (#{\Z \z} (nth s si)))

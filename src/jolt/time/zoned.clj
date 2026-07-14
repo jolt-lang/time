@@ -177,7 +177,8 @@
 
 (statics! ["OffsetDateTime" "java.time.OffsetDateTime"]
   {"of" (fn ([ldt off] (offset-of-ldt ldt off))
-            ([d tm off] (offset-of-ldt (l/local-dt (l/ld-epoch-day d) (l/lt-nano-of-day tm)) off)))
+            ([d tm off] (offset-of-ldt (l/local-dt (l/ld-epoch-day d) (l/lt-nano-of-day tm)) off))
+            ([y mo d h mi s nano off] (offset-of-ldt (l/local-dt (days-from-civil (u/->long y) (u/->long mo) (u/->long d)) (u/hmsn->nano (u/->long h) (u/->long mi) (u/->long s) (u/->long nano))) off)))
    "now" (fn [& args] (let [nanos (* (impl/clock-millis (first args)) 1000000)] (odt (u/floor-div nanos npd) (u/floor-mod nanos npd) 0)))
    "ofInstant" (fn [i zone] (let [nanos (inst/inst-nanos i) [id off0] (z/resolve-zone zone)
                                   off (z/zone-offset-at-instant id off0 (u/floor-div nanos nps)) local (+ nanos (* off nps))]
