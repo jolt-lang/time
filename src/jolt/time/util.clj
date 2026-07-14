@@ -65,3 +65,65 @@
 (def date-based-fields
   #{"DAY_OF_WEEK" "DAY_OF_MONTH" "DAY_OF_YEAR" "EPOCH_DAY"
     "MONTH_OF_YEAR" "PROLEPTIC_MONTH" "YEAR_OF_ERA" "YEAR" "ERA"})
+
+;; --- nano-of-day <-> h/m/s/nano ----------------------------------------------
+(defn hmsn->nano [h m s nano] (+ (* (+ (* h 3600) (* m 60) s) nanos-per-sec) nano))
+
+;; --- integer power of ten (no float rounding) --------------------------------
+(defn pow10 [n] (reduce * 1 (repeat n 10)))
+
+;; --- zero-padding + ISO rendering --------------------------------------------
+(defn pad-left [s n] (str (apply str (repeat (max 0 (- n (count s))) "0")) s))
+(defn pad2 [n] (pad-left (str n) 2))
+(defn pad4
+  "java.time's proleptic-year rendering: 4 digits for 0..9999, a sign otherwise."
+  [y]
+  (cond (neg? y)   (str "-" (pad-left (str (- y)) 4))
+        (> y 9999) (str "+" y)
+        :else      (pad-left (str y) 4)))
+
+;; nano fraction as 3/6/9 digits (LocalTime style: shortest group that fits).
+(defn frac-digits [nano]
+  (cond (zero? (mod nano 1000000)) (pad-left (str (quot nano 1000000)) 3)
+        (zero? (mod nano 1000))    (pad-left (str (quot nano 1000)) 6)
+        :else                      (pad-left (str nano) 9)))
+
+;; leading `digits` of nano's 9-digit zero-padded form (fixed-width fraction).
+(defn frac-fixed [nano digits] (subs (pad-left (str nano) 9) 0 digits))
+
+(defn iso-time-str [nod]
+  (let [h    (quot nod (* 3600 nanos-per-sec))
+        mi   (mod (quot nod (* 60 nanos-per-sec)) 60)
+        s    (mod (quot nod nanos-per-sec) 60)
+        nano (mod nod nanos-per-sec)]
+    (str (pad2 h) ":" (pad2 mi)
+         (if (and (zero? s) (zero? nano)) ""
+             (str ":" (pad2 s) (if (zero? nano) "" (str "." (frac-digits nano))))))))
+
+;; --- ISO parsing -------------------------------------------------------------
+(defn- digit? [c] (and (>= (int c) 48) (<= (int c) 57)))
+
+(defn digits-at
+  "n digits from index i as an integer, or nil."
+  [s i n]
+  (when (<= (+ i n) (count s))
+    (loop [j i acc 0]
+      (if (= j (+ i n)) acc
+          (let [c (nth s j)]
+            (when (digit? c) (recur (inc j) (+ (* acc 10) (- (int c) 48)))))))))
+
+(defn parse-hms->nano
+  "Parse HH:mm[:ss[.fraction]] to nano-of-day."
+  [s]
+  (let [len (count s) h (digits-at s 0 2) mi (digits-at s 3 2)]
+    (when-not (and h mi (= \: (nth s 2)))
+      (throw (ex-info (str "could not parse LocalTime: " s) {})))
+    (let [s2 (and (> len 5) (= \: (nth s 5)) (digits-at s 6 2))]
+      (cond
+        (not s2) (hmsn->nano h mi 0 0)
+        (and (< 8 len) (= \. (nth s 8)))
+        (loop [j 9 k 0 acc 0]
+          (if (and (< j len) (digit? (nth s j)))
+            (recur (inc j) (inc k) (+ (* acc 10) (- (int (nth s j)) 48)))
+            (hmsn->nano h mi s2 (* acc (pow10 (max 0 (- 9 k)))))))
+        :else (hmsn->nano h mi s2 0)))))

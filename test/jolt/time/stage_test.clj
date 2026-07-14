@@ -3,11 +3,13 @@
   JOLT_NO_JAVA_TIME=1 so the library is the sole java.time provider."
   (:require [clojure.test :as test]
             [jolt.time.impl-test]
-            [jolt.time.enums-test]))
+            [jolt.time.enums-test]
+            [jolt.time.local-test]))
 
 (def suites
   '[jolt.time.impl-test
-    jolt.time.enums-test])
+    jolt.time.enums-test
+    jolt.time.local-test])
 
 (defn -main [& _]
   (let [r (apply test/run-tests suites)]
