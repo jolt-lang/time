@@ -10,7 +10,8 @@
             [jolt.time.temporal-test]
             [jolt.time.instant-test]
             [jolt.time.zones-test]
-            [jolt.time.zoned-test]))
+            [jolt.time.zoned-test]
+            [jolt.time.fmt-test]))
 
 (def suites
   '[jolt.time.impl-test
@@ -21,7 +22,8 @@
     jolt.time.temporal-test
     jolt.time.instant-test
     jolt.time.zones-test
-    jolt.time.zoned-test])
+    jolt.time.zoned-test
+    jolt.time.fmt-test])
 
 (defn -main [& _]
   (let [r (apply test/run-tests suites)]
