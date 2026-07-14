@@ -8,7 +8,8 @@
             [jolt.time.amount-test]
             [jolt.time.year-test]
             [jolt.time.temporal-test]
-            [jolt.time.instant-test]))
+            [jolt.time.instant-test]
+            [jolt.time.zones-test]))
 
 (def suites
   '[jolt.time.impl-test
@@ -17,7 +18,8 @@
     jolt.time.amount-test
     jolt.time.year-test
     jolt.time.temporal-test
-    jolt.time.instant-test])
+    jolt.time.instant-test
+    jolt.time.zones-test])
 
 (defn -main [& _]
   (let [r (apply test/run-tests suites)]
