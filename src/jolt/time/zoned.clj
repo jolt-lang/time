@@ -46,7 +46,7 @@
     (str (l/iso-datetime-str (zdt-ed x) (zdt-nod x)) suf
          (if (or (= id suf) (and (pos? (count id)) (#{\+ \- \Z} (nth id 0)))) "" (str "[" id "]")))))
 
-(defn- parse-zoned [s]
+(defn parse-zoned [s]
   ;; "<local>[±HH:mm | Z][zone]" — a [zone] with no explicit offset means the
   ;; local part is wall time in that zone; otherwise it's an instant + zone.
   (let [zb (.indexOf s "[")
