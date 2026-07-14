@@ -17,6 +17,10 @@
   ;; (used by the interval suite) and tick's test namespaces are vendored under
   ;; vendor/ so the gate is self-contained.
   :test {:extra-paths ["test" "vendor/tick-test" "vendor/spec-alpha"]
-         :main-opts ["-m" "jolt.time-test-runner"]}}
+         :main-opts ["-m" "jolt.time-test-runner"]}
+
+  ;; Per-stage unit gate for the java.time port (run under JOLT_NO_JAVA_TIME=1).
+  :impl-test {:extra-paths ["test"]
+              :main-opts ["-m" "jolt.time.impl-test"]}}
 
  :tasks {test "joltc -M:test"}}
