@@ -299,3 +299,15 @@
    "range" (fn [x f] (t/temporal-range (odt-ldt x) (e/cf-name f)))
    "isEqual" (fn [x o] (= (odt->nanos x) (other-nanos o)))
    "hashCode" (fn [x] (hash (odt->nanos x)))})
+
+;; ZDT/ODT support INSTANT_SECONDS + OFFSET_SECONDS (fields-test iterates all fields)
+(let [zget (fn [x f] (case (e/cf-name f)
+                       "INSTANT_SECONDS" (u/floor-div (zdt->nanos x) nps)
+                       "OFFSET_SECONDS" (zdt-off x)
+                       (t/get-field (zdt-ldt x) (e/cf-name f))))
+      oget (fn [x f] (case (e/cf-name f)
+                       "INSTANT_SECONDS" (u/floor-div (odt->nanos x) nps)
+                       "OFFSET_SECONDS" (odt-off x)
+                       (t/get-field (odt-ldt x) (e/cf-name f))))]
+  (__register-class-methods! :jolt.time/zoned-date-time {"get" zget "getLong" zget})
+  (__register-class-methods! :jolt.time/offset-date-time {"get" oget "getLong" oget}))

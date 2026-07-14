@@ -14,6 +14,13 @@
 (defn inst-nanos [x] (impl/field x :nanos))
 (defn inst? [x] (= :jolt.time/instant (impl/type-of x)))
 
+;; epoch nanos of ANY instant-like value. The #inst/Date layer keeps its own
+;; instant representation, and tick converts a java.util.Date to one; comparing a
+;; library instant against it must still work, at millisecond granularity.
+(defn- o-nanos [o]
+  (if (inst? o) (inst-nanos o)
+    (try (* (.toEpochMilli o) 1000000) (catch Throwable _ (inst-nanos o)))))
+
 (defn- iso-instant-str [en]
   (let [secs (u/floor-div en nps) nano (u/floor-mod en nps)
         ed (u/floor-div secs 86400) sod (u/floor-mod secs 86400)]
@@ -66,10 +73,10 @@
      "minusSeconds" (fn [x n] (instant (- (inst-nanos x) (* (u/->long n) nps))))
      "plusNanos"   (fn [x n] (instant (+ (inst-nanos x) (u/->long n))))
      "minusNanos"  (fn [x n] (instant (- (inst-nanos x) (u/->long n))))
-     "isBefore"    (fn [x o] (< (inst-nanos x) (inst-nanos o)))
-     "isAfter"     (fn [x o] (> (inst-nanos x) (inst-nanos o)))
-     "compareTo"   (fn [x o] (compare (inst-nanos x) (inst-nanos o)))
-     "equals"      (fn [x o] (boolean (and (impl/jt? o) (inst? o) (= (inst-nanos x) (inst-nanos o)))))
+     "isBefore"    (fn [x o] (< (inst-nanos x) (o-nanos o)))
+     "isAfter"     (fn [x o] (> (inst-nanos x) (o-nanos o)))
+     "compareTo"   (fn [x o] (compare (inst-nanos x) (o-nanos o)))
+     "equals"      (fn [x o] (= (inst-nanos x) (o-nanos o)))
      "hashCode"    (fn [x] (inst-nanos x))
      "truncatedTo" (fn [x unit] (let [d (unit-nanos unit)] (instant (* (u/floor-div (inst-nanos x) d) d))))
      "toString"    (fn [x] (iso-instant-str (inst-nanos x)))}))
@@ -104,3 +111,13 @@
   {"toInstant" (fn [x & _] (instant (* (l/ldt->ms x) 1000000)))})
 
 (a/register-nanos! :jolt.time/instant inst-nanos)
+
+;; java.util.Date/from a library Instant (tick's t/inst goes through this). Builds
+;; a Date via its core (#inst-layer) constructor from the instant's epoch millis.
+(statics! ["Date" "java.util.Date"]
+  {"from" (fn [i] (java.util.Date. (u/floor-div (inst-nanos i) 1000000)))})
+
+;; make the #inst/Date layer's Date.toInstant etc. yield THIS instant, so a Date
+;; and a library instant compare and print as one representation.
+(when-let [set-ctor (resolve 'jolt.host/set-instant-ctor!)]
+  ((deref set-ctor) (fn [nanos] (instant nanos))))

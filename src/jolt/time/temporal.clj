@@ -184,6 +184,7 @@
       DT (or (contains? date-fields f) (contains? time-fields f))
       :jolt.time/year (contains? #{"YEAR" "YEAR_OF_ERA" "ERA"} f)
       :jolt.time/year-month (contains? #{"YEAR" "MONTH_OF_YEAR" "PROLEPTIC_MONTH" "YEAR_OF_ERA" "ERA"} f)
+      :jolt.time/instant (contains? #{"INSTANT_SECONDS" "NANO_OF_SECOND" "MICRO_OF_SECOND" "MILLI_OF_SECOND"} f)
       false)))
 (defn supports-unit? [t unit]
   (let [u (u/upper unit)]

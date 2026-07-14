@@ -19,9 +19,13 @@
 (defn iso-datetime-str [ed nod] (str (iso-date-str ed) "T" (u/iso-time-str nod)))
 
 (defn parse-iso-date [s]
-  (let [y (u/digits-at s 0 4) m (u/digits-at s 5 2) d (u/digits-at s 8 2)]
-    (if (and y m d (= \- (nth s 4)) (= \- (nth s 7)))
-      (days-from-civil y m d)
+  ;; yyyy-MM-dd, plus proleptic/extended years like -999999999-01-01.
+  (let [neg (= \- (nth s 0)) body (if neg (subs s 1) s) n (count body)
+        d1 (loop [i 0] (if (or (>= i n) (= \- (nth body i))) i (recur (inc i))))
+        d2 (loop [i (inc d1)] (if (or (>= i n) (= \- (nth body i))) i (recur (inc i))))
+        y (parse-long (subs body 0 d1)) m (parse-long (subs body (inc d1) d2)) d (parse-long (subs body (inc d2)))]
+    (if (and y m d)
+      (days-from-civil (* (if neg -1 1) y) m d)
       (throw (ex-info (str "could not parse LocalDate: " s) {})))))
 
 (defn lt-hour [nod] (quot nod (* 3600 nps)))
