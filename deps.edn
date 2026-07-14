@@ -1,26 +1,18 @@
-;; time-literals' git layout keeps its source under a profile path (temporal/src)
-;; that jolt's resolver can't select, so its small #time data-reader glue is
-;; vendored here; tick and cljc.java-time resolve straight from source.
+;; tick provides the idiomatic Clojure time API on top of the java.time.* shim in
+;; src/. tick's own transitive deps — cljc.java-time and time-literals — resolve
+;; from Maven automatically (jolt fetches the source from the JAR). time-literals
+;; is still vendored: its #time data-readers use the (. Class parse) dot-form,
+;; which jolt doesn't yet compile (jolt-5hnv), so the vendored copy carries the
+;; equivalent slash-form; being on :paths it shadows the Maven one.
 {:paths ["src" "vendor/time-literals"]
 
- ;; tick provides the idiomatic Clojure time API; cljc.java-time is the thin
- ;; java.time wrapper it sits on. Pulled from source (jolt resolves git, not Maven).
  :deps {io.github.juxt/tick
         {:git/url "https://github.com/juxt/tick.git"
-         :git/sha "3c2cc4e809c21476f63470cd3e5cb2ff8fa5ef69"}
-        com.widdindustries/cljc.java-time
-        {:git/url "https://github.com/henryw374/cljc.java-time.git"
-         :git/sha "652f64fef7185a080200d7d1696e26958791ff02"}}
+         :git/sha "3c2cc4e809c21476f63470cd3e5cb2ff8fa5ef69"}}
 
  :aliases
- {;; The gate: tick's own suite + the migrated jolt java.time cases. spec.alpha
-  ;; (used by the interval suite) and tick's test namespaces are vendored under
-  ;; vendor/ so the gate is self-contained.
-  :test {:extra-paths ["test" "vendor/tick-test" "vendor/spec-alpha"]
+ {:test {:extra-paths ["test" "vendor/tick-test" "vendor/spec-alpha"]
          :main-opts ["-m" "jolt.time-test-runner"]}
-
-  ;; Per-stage unit gate for the java.time port (run under JOLT_NO_JAVA_TIME=1).
-  :diag {:extra-paths ["test" "vendor/tick-test" "vendor/spec-alpha"] :main-opts ["-m" "jolt.time.diag"]}
 
   :stage {:extra-paths ["test"]
           :main-opts ["-m" "jolt.time.stage-test"]}}
