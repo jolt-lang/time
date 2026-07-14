@@ -4,12 +4,14 @@
   (:require [clojure.test :as test]
             [jolt.time.impl-test]
             [jolt.time.enums-test]
-            [jolt.time.local-test]))
+            [jolt.time.local-test]
+            [jolt.time.amount-test]))
 
 (def suites
   '[jolt.time.impl-test
     jolt.time.enums-test
-    jolt.time.local-test])
+    jolt.time.local-test
+    jolt.time.amount-test])
 
 (defn -main [& _]
   (let [r (apply test/run-tests suites)]
