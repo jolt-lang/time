@@ -13,21 +13,21 @@
 (def ^:private nps u/nanos-per-sec)
 
 ;; --- shared date/time helpers ------------------------------------------------
-(defn- ld-dow [ed] (inc (u/floor-mod (+ ed 3) 7)))
-(defn- ld-day-of-year [ed] (let [[y _ _] (civil-from-days ed)] (inc (- ed (days-from-civil y 1 1)))))
-(defn- iso-date-str [ed] (let [[y m d] (civil-from-days ed)] (str (u/pad4 y) "-" (u/pad2 m) "-" (u/pad2 d))))
-(defn- iso-datetime-str [ed nod] (str (iso-date-str ed) "T" (u/iso-time-str nod)))
+(defn ld-dow [ed] (inc (u/floor-mod (+ ed 3) 7)))
+(defn ld-day-of-year [ed] (let [[y _ _] (civil-from-days ed)] (inc (- ed (days-from-civil y 1 1)))))
+(defn iso-date-str [ed] (let [[y m d] (civil-from-days ed)] (str (u/pad4 y) "-" (u/pad2 m) "-" (u/pad2 d))))
+(defn iso-datetime-str [ed nod] (str (iso-date-str ed) "T" (u/iso-time-str nod)))
 
-(defn- parse-iso-date [s]
+(defn parse-iso-date [s]
   (let [y (u/digits-at s 0 4) m (u/digits-at s 5 2) d (u/digits-at s 8 2)]
     (if (and y m d (= \- (nth s 4)) (= \- (nth s 7)))
       (days-from-civil y m d)
       (throw (ex-info (str "could not parse LocalDate: " s) {})))))
 
-(defn- lt-hour [nod] (quot nod (* 3600 nps)))
-(defn- lt-minute [nod] (mod (quot nod (* 60 nps)) 60))
-(defn- lt-second [nod] (mod (quot nod nps) 60))
-(defn- lt-nano [nod] (mod nod nps))
+(defn lt-hour [nod] (quot nod (* 3600 nps)))
+(defn lt-minute [nod] (mod (quot nod (* 60 nps)) 60))
+(defn lt-second [nod] (mod (quot nod nps) 60))
+(defn lt-nano [nod] (mod nod nps))
 
 ;; --- LocalDate ---------------------------------------------------------------
 
@@ -38,15 +38,15 @@
 (defn- ld-of [y m d] (local-date (days-from-civil y m d)))
 (defn- ld-from-ms [ms] (local-date (u/floor-div ms 86400000)))
 
-(defn- ld-plus-months [d n]
+(defn ld-plus-months [d n]
   (let [[y m dom] (civil-from-days (ld-epoch-day d))
         ym (+ (* y 12) (dec m) n)
         y2 (u/floor-div ym 12) m2 (inc (u/floor-mod ym 12))]
     (local-date (days-from-civil y2 m2 (min dom (u/len-of-month y2 m2))))))
-(defn- ld-plus-years [d n]
+(defn ld-plus-years [d n]
   (let [[y m dom] (civil-from-days (ld-epoch-day d))]
     (local-date (days-from-civil (+ y n) m (min dom (u/len-of-month (+ y n) m))))))
-(defn- ld-with [d which v]
+(defn ld-with [d which v]
   (let [[y m dom] (civil-from-days (ld-epoch-day d))]
     (case which
       :year  (local-date (days-from-civil v m (min dom (u/len-of-month v m))))
@@ -120,8 +120,8 @@
 (defn lt-nano-of-day [t] (impl/field t :nod))
 (defn lt? [t] (= :jolt.time/local-time (impl/type-of t)))
 
-(defn- lt-plus [t nanos] (local-time (u/floor-mod (+ (lt-nano-of-day t) nanos) npd)))
-(defn- lt-with [t which v]
+(defn lt-plus [t nanos] (local-time (u/floor-mod (+ (lt-nano-of-day t) nanos) npd)))
+(defn lt-with [t which v]
   (let [nod (lt-nano-of-day t) h (lt-hour nod) mi (lt-minute nod) s (lt-second nod) nano (lt-nano nod)]
     (case which
       :hour   (local-time (u/hmsn->nano v mi s nano))
@@ -133,11 +133,11 @@
   {"NANOS" 1 "MICROS" 1000 "MILLIS" 1000000 "SECONDS" u/nanos-per-sec
    "MINUTES" (* 60 u/nanos-per-sec) "HOURS" (* 3600 u/nanos-per-sec) "DAYS" u/nanos-per-day})
 
-(defn- unit-name [u]
+(defn unit-name [u]
   (cond (and (impl/jt? u) (= :jolt.time/chrono-unit (impl/type-of u))) (e/cu-name u)
         (string? u) u
         (keyword? u) (name u)))
-(defn- lt-truncate [nod u] (let [div (get trunc-div (unit-name u) 1)] (* (quot nod div) div)))
+(defn lt-truncate [nod u] (let [div (get trunc-div (unit-name u) 1)] (* (quot nod div) div)))
 
 (impl/register-type! :jolt.time/local-time
   {:eq   (fn [a b] (= (lt-nano-of-day a) (lt-nano-of-day b)))
@@ -200,10 +200,10 @@
 (defn- ldt-key [x] [(ldt-epoch-day x) (ldt-nod x)])
 (defn- ldt-cmp [a b] (compare (ldt-key a) (ldt-key b)))
 
-(defn- ldt-date [x] (local-date (ldt-epoch-day x)))
-(defn- ldt-time [x] (local-time (ldt-nod x)))
-(defn- ldt-combine [d t] (local-dt (ld-epoch-day d) (lt-nano-of-day t)))
-(defn- ldt-plus-nanos [x nanos]
+(defn ldt-date [x] (local-date (ldt-epoch-day x)))
+(defn ldt-time [x] (local-time (ldt-nod x)))
+(defn ldt-combine [d t] (local-dt (ld-epoch-day d) (lt-nano-of-day t)))
+(defn ldt-plus-nanos [x nanos]
   (let [total (+ (ldt-nod x) nanos)]
     (local-dt (+ (ldt-epoch-day x) (u/floor-div total npd)) (u/floor-mod total npd))))
 (defn ldt->ms [x] (+ (* (ldt-epoch-day x) 86400000) (quot (ldt-nod x) 1000000)))

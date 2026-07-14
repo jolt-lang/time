@@ -163,7 +163,7 @@
       (str "P" (when-not (zero? y) (str y "Y")) (when-not (zero? m) (str m "M"))
            (when-not (zero? d) (str d "D"))))))
 
-(defn- per-between [a b]
+(defn per-between [a b]
   (let [[y1 m1 d1] (civil-from-days (l/ld-epoch-day a))
         [y2 m2 d2] (civil-from-days (l/ld-epoch-day b))
         total-months (- (+ (* y2 12) m2) (+ (* y1 12) m1))

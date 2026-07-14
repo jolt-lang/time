@@ -6,14 +6,16 @@
             [jolt.time.enums-test]
             [jolt.time.local-test]
             [jolt.time.amount-test]
-            [jolt.time.year-test]))
+            [jolt.time.year-test]
+            [jolt.time.temporal-test]))
 
 (def suites
   '[jolt.time.impl-test
     jolt.time.enums-test
     jolt.time.local-test
     jolt.time.amount-test
-    jolt.time.year-test])
+    jolt.time.year-test
+    jolt.time.temporal-test])
 
 (defn -main [& _]
   (let [r (apply test/run-tests suites)]

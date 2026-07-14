@@ -13,6 +13,9 @@
 (def day-names
   ["MONDAY" "TUESDAY" "WEDNESDAY" "THURSDAY" "FRIDAY" "SATURDAY" "SUNDAY"])
 
+(defn upper [s]
+  (apply str (map (fn [c] (if (and (>= (int c) 97) (<= (int c) 122)) (char (- (int c) 32)) c)) s)))
+
 (defn leap? [y]
   (and (zero? (mod y 4)) (or (not (zero? (mod y 100))) (zero? (mod y 400)))))
 
