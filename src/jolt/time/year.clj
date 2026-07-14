@@ -44,7 +44,7 @@
 
 (statics! ["Year" "java.time.Year"]
   {"of"    (fn [y] (year (u/->long y)))
-   "now"   (fn [& _] (year (first (civil-from-days (u/floor-div (System/currentTimeMillis) 86400000)))))
+   "now"   (fn [& args] (year (first (civil-from-days (u/floor-div (impl/clock-millis (first args)) 86400000)))))
    "isLeap" (fn [y] (u/leap? (u/->long y)))
    "parse" (fn [s & _] (year (or (parse-long (str s)) (throw (ex-info "could not parse Year" {})))))
    "MIN_VALUE" -999999999
@@ -103,7 +103,36 @@
 
 (statics! ["YearMonth" "java.time.YearMonth"]
   {"of"    (fn [y m] (year-month (u/->long y) (u/->long m)))
-   "now"   (fn [& _] (let [[y m _] (civil-from-days (u/floor-div (System/currentTimeMillis) 86400000))] (year-month y m)))
+   "now"   (fn [& args] (let [[y m _] (civil-from-days (u/floor-div (impl/clock-millis (first args)) 86400000))] (year-month y m)))
    "parse" (fn [s & _] (let [d (str s)]
                          (year-month (or (u/digits-at d 0 4) (throw (ex-info "could not parse YearMonth" {})))
                                      (or (u/digits-at d 5 2) (throw (ex-info "could not parse YearMonth" {}))))))})
+
+;; --- MonthDay ----------------------------------------------------------------
+
+(defn month-day [m d] (impl/value :jolt.time/month-day {:month m :day d}))
+(defn md-month [x] (impl/field x :month))
+(defn md-day [x] (impl/field x :day))
+(defn md? [x] (= :jolt.time/month-day (impl/type-of x)))
+(defn- md->string [x] (str "--" (u/pad2 (md-month x)) "-" (u/pad2 (md-day x))))
+
+(impl/register-type! :jolt.time/month-day
+  {:eq (fn [a b] (= [(md-month a) (md-day a)] [(md-month b) (md-day b)]))
+   :hash (fn [x] (+ (* (md-month x) 100) (md-day x)))
+   :str md->string :cmp (fn [a b] (compare [(md-month a) (md-day a)] [(md-month b) (md-day b)]))
+   :classes #{"java.time.MonthDay" "MonthDay" "java.time.temporal.TemporalAccessor" "TemporalAccessor"
+              "java.time.temporal.TemporalAdjuster" "TemporalAdjuster" "java.lang.Comparable" "Comparable"}})
+
+(__register-class-methods! :jolt.time/month-day
+  {"getMonthValue" md-month "getDayOfMonth" md-day "getMonth" (fn [x] (e/month (md-month x)))
+   "atYear" (fn [x y] (l/local-date (days-from-civil (u/->long y) (md-month x) (md-day x))))
+   "isValidYear" (fn [x y] (<= (md-day x) (u/len-of-month (u/->long y) (md-month x))))
+   "compareTo" (fn [x o] (compare [(md-month x) (md-day x)] [(md-month o) (md-day o)]))
+   "equals" (fn [x o] (boolean (and (impl/jt? o) (md? o) (= (md-month x) (md-month o)) (= (md-day x) (md-day o)))))
+   "hashCode" (fn [x] (+ (* (md-month x) 100) (md-day x))) "toString" md->string})
+
+(statics! ["MonthDay" "java.time.MonthDay"]
+  {"of" (fn [m d] (month-day (u/->long m) (u/->long d)))
+   "parse" (fn [s & _] (let [d (str s) o (if (= "--" (subs d 0 2)) 2 0)]
+                         (month-day (u/digits-at d o 2) (u/digits-at d (+ o 3) 2))))
+   "now" (fn [& args] (let [[_ m dd] (civil-from-days (u/floor-div (impl/clock-millis (first args)) 86400000))] (month-day m dd)))})

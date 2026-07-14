@@ -47,12 +47,16 @@
          (if (or (= id suf) (and (pos? (count id)) (#{\+ \- \Z} (nth id 0)))) "" (str "[" id "]")))))
 
 (defn- parse-zoned [s]
-  ;; "<local>[±HH:mm | Z][zone]" — split the optional [zone] then the offset.
+  ;; "<local>[±HH:mm | Z][zone]" — a [zone] with no explicit offset means the
+  ;; local part is wall time in that zone; otherwise it's an instant + zone.
   (let [zb (.indexOf s "[")
         zone (when (>= zb 0) (subs s (inc zb) (dec (count s))))
         body (if (>= zb 0) (subs s 0 zb) s)
-        nanos (inst/parse-iso-instant body)]  ; local+offset -> utc nanos
-    (zoned-of-instant nanos (or zone "Z"))))
+        ti (.indexOf body "T")
+        has-off (some (fn [i] (#{\Z \z \+ \-} (nth body i))) (range (inc ti) (count body)))]
+    (if (and zone (not has-off))
+      (zoned-of-ldt (l/local-dt (l/parse-iso-date (subs body 0 ti)) (u/parse-hms->nano (subs body (inc ti)))) zone)
+      (zoned-of-instant (inst/parse-iso-instant body) (or zone "Z")))))
 
 (impl/register-type! :jolt.time/zoned-date-time
   {:eq (fn [a b] (= [(zdt-ed a) (zdt-nod a) (zdt-off a) (z/zid-id (zdt-zid a))]
@@ -128,7 +132,8 @@
                                                                  (u/hmsn->nano (u/->long h) (u/->long mi) (u/->long s) (u/->long nano))) zone)))
    "ofInstant" (fn ([i zone] (zoned-of-instant (inst/inst-nanos i) zone))
                    ([ldt _off zone] (zoned-of-ldt ldt zone)))
-   "now" (fn [& _] (zoned-of-instant (* (System/currentTimeMillis) 1000000) "Z"))
+   "now" (fn [& args] (let [clk (first args) zone (if (and (impl/jt? clk) (= :jolt.time/clock (impl/type-of clk))) (impl/field clk :zone) "Z")]
+                       (zoned-of-instant (* (impl/clock-millis clk) 1000000) zone)))
    "parse" (fn [s & _] (parse-zoned (str s)))})
 
 ;; --- OffsetDateTime ----------------------------------------------------------
@@ -165,6 +170,7 @@
    "atZoneSameInstant" (fn [x zone] (zoned-of-instant (odt->nanos x) zone))
    "get" (fn [x f] (t/get-field (odt-ldt x) (e/cf-name f))) "getLong" (fn [x f] (t/get-field (odt-ldt x) (e/cf-name f)))
    "isBefore" (fn [x o] (< (odt->nanos x) (other-nanos o))) "isAfter" (fn [x o] (> (odt->nanos x) (other-nanos o)))
+   "isEqual" (fn [x o] (= (odt->nanos x) (other-nanos o)))
    "compareTo" (fn [x o] (compare (odt->nanos x) (odt->nanos o)))
    "equals" (fn [x o] (boolean (and (impl/jt? o) (odt? o) (= (odt->nanos x) (odt->nanos o)))))
    "hashCode" (fn [x] (hash (odt->nanos x))) "toString" odt->string})
@@ -172,7 +178,12 @@
 (statics! ["OffsetDateTime" "java.time.OffsetDateTime"]
   {"of" (fn ([ldt off] (offset-of-ldt ldt off))
             ([d tm off] (offset-of-ldt (l/local-dt (l/ld-epoch-day d) (l/lt-nano-of-day tm)) off)))
-   "now" (fn [& _] (let [nanos (* (System/currentTimeMillis) 1000000)] (odt (u/floor-div nanos npd) (u/floor-mod nanos npd) 0)))
+   "now" (fn [& args] (let [nanos (* (impl/clock-millis (first args)) 1000000)] (odt (u/floor-div nanos npd) (u/floor-mod nanos npd) 0)))
+   "ofInstant" (fn [i zone] (let [nanos (inst/inst-nanos i) [id off0] (z/resolve-zone zone)
+                                  off (z/zone-offset-at-instant id off0 (u/floor-div nanos nps)) local (+ nanos (* off nps))]
+                              (odt (u/floor-div local npd) (u/floor-mod local npd) off)))
+   "MIN" (odt (days-from-civil -999999999 1 1) 0 (* 18 3600))
+   "MAX" (odt (days-from-civil 999999999 12 31) (dec npd) (* -18 3600))
    "parse" (fn [s & _] (let [nanos (inst/parse-iso-instant (str s))
                              op (some (fn [i] (when (#{\Z \z \+ \-} (nth (str s) i)) i)) (range (inc (.indexOf (str s) "T")) (count (str s))))
                              off (z/parse-zone-offset (if op (subs (str s) op) "Z"))
@@ -195,7 +206,9 @@
    "toString" (fn [x] (str (u/iso-time-str (ot-nod x)) (offset-suffix (ot-off x))))})
 (statics! ["OffsetTime" "java.time.OffsetTime"]
   {"of" (fn ([tm off] (ot (l/lt-nano-of-day tm) (zo-secs* off)))
-            ([h m s nano off] (ot (u/hmsn->nano (u/->long h) (u/->long m) (u/->long s) (u/->long nano)) (zo-secs* off))))})
+            ([h m s nano off] (ot (u/hmsn->nano (u/->long h) (u/->long m) (u/->long s) (u/->long nano)) (zo-secs* off))))
+   "MIN" (ot 0 (* 18 3600))
+   "MAX" (ot (dec npd) (* -18 3600))})
 
 ;; --- Clock -------------------------------------------------------------------
 (defn- clock [kind ms zone base] (impl/value :jolt.time/clock {:kind kind :ms ms :zone zone :base base}))
@@ -215,7 +228,9 @@
   {"systemUTC" (fn [] (clock :system 0 (z/zone-id "Z" 0) nil))
    "systemDefaultZone" (fn [] (clock :system 0 (z/zone-id "Z" 0) nil))
    "system" (fn [zone] (clock :system 0 (z/zone-id-of zone) nil))
-   "fixed" (fn [i zone] (clock :fixed (u/floor-div (inst/inst-nanos i) 1000000) (z/zone-id-of zone) nil))})
+   "fixed" (fn [i zone] (clock :fixed (u/floor-div (inst/inst-nanos i) 1000000) (z/zone-id-of zone) nil))
+   "offset" (fn [clk dur] (clock :offset (u/floor-div (a/dur-total-nanos dur) 1000000) (impl/field clk :zone) clk))
+   "tick" (fn [clk dur] (clock :tick (u/floor-div (a/dur-total-nanos dur) 1000000) (impl/field clk :zone) clk))})
 
 ;; --- the deferred atZone / atOffset ------------------------------------------
 (__register-class-methods! :jolt.time/local-date-time
@@ -229,3 +244,58 @@
   {"atStartOfDay" (fn [x & args] (if (and (seq args) (impl/jt? (first args)))
                                    (zoned-of-ldt (l/local-dt (l/ld-epoch-day x) 0) (first args))
                                    (l/local-dt (l/ld-epoch-day x) 0)))})
+
+;; wire zoned/offset into Duration/between + the clock-aware statics
+(a/register-nanos! :jolt.time/zoned-date-time zdt->nanos)
+(a/register-nanos! :jolt.time/offset-date-time odt->nanos)
+
+;; --- fill out the generic surface on ZonedDateTime / OffsetDateTime ----------
+(defn- unit-nm [u] (u/upper (if (and (impl/jt? u) (= :jolt.time/chrono-unit (impl/type-of u))) (e/cu-name u) (str u))))
+(defn- is-supported [ldt a]
+  (cond (and (impl/jt? a) (= :jolt.time/chrono-unit (impl/type-of a))) (not= "FOREVER" (e/cu-name a))
+        (and (impl/jt? a) (= :jolt.time/chrono-field (impl/type-of a))) true
+        :else false))
+
+(__register-class-methods! :jolt.time/zoned-date-time
+  {"isSupported" (fn [x a] (is-supported (zdt-ldt x) a))
+   "range" (fn [x f] (t/temporal-range (zdt-ldt x) (e/cf-name f)))
+   "with" (fn ([x adj] (rewrap x (t/apply-adjuster (zdt-ldt x) adj)))
+              ([x f v] (rewrap x (t/with-field (zdt-ldt x) (e/cf-name f) (u/->long v)))))})
+
+(__register-class-methods! :jolt.time/offset-date-time
+  {"getMonth" (fn [x] (e/month (second (civil-from-days (odt-ed x)))))
+   "getDayOfWeek" (fn [x] (e/dow (inc (u/floor-mod (+ (odt-ed x) 3) 7))))
+   "getMinute" (fn [x] (t/get-field (odt-ldt x) "MINUTE_OF_HOUR")) "getSecond" (fn [x] (t/get-field (odt-ldt x) "SECOND_OF_MINUTE"))
+   "getNano" (fn [x] (t/get-field (odt-ldt x) "NANO_OF_SECOND"))
+   "toOffsetTime" (fn [x] (ot (odt-nod x) (odt-off x)))
+   "minusDays" (fn [x n] (orewrap x (l/local-dt (- (odt-ed x) (u/->long n)) (odt-nod x))))
+   "plusMonths" (fn [x n] (orewrap x (t/plus-unit (odt-ldt x) (u/->long n) "MONTHS")))
+   "minusMonths" (fn [x n] (orewrap x (t/plus-unit (odt-ldt x) (- (u/->long n)) "MONTHS")))
+   "plusYears" (fn [x n] (orewrap x (t/plus-unit (odt-ldt x) (u/->long n) "YEARS")))
+   "minusYears" (fn [x n] (orewrap x (t/plus-unit (odt-ldt x) (- (u/->long n)) "YEARS")))
+   "minusHours" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (- (* (u/->long n) 3600 nps)))))
+   "plusMinutes" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (* (u/->long n) 60 nps))))
+   "minusMinutes" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (- (* (u/->long n) 60 nps)))))
+   "minusSeconds" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (- (* (u/->long n) nps)))))
+   "plusNanos" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (u/->long n))))
+   "minusNanos" (fn [x n] (orewrap x (l/ldt-plus-nanos (odt-ldt x) (- (u/->long n)))))
+   "withYear" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "YEAR" (u/->long v))))
+   "withMonth" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "MONTH_OF_YEAR" (u/->long v))))
+   "withDayOfMonth" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "DAY_OF_MONTH" (u/->long v))))
+   "withHour" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "HOUR_OF_DAY" (u/->long v))))
+   "withMinute" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "MINUTE_OF_HOUR" (u/->long v))))
+   "withSecond" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "SECOND_OF_MINUTE" (u/->long v))))
+   "withNano" (fn [x v] (orewrap x (t/with-field (odt-ldt x) "NANO_OF_SECOND" (u/->long v))))
+   "truncatedTo" (fn [x unit] (orewrap x (l/local-dt (odt-ed x) (let [d (or (u/chrono-unit-nanos (unit-nm unit)) 1)] (* (quot (odt-nod x) d) d)))))
+   "toEpochSecond" (fn [x] (u/floor-div (odt->nanos x) nps))
+   "plus" (fn ([x amt] (orewrap x (if (a/dur? amt) (l/ldt-plus-nanos (odt-ldt x) (a/dur-total-nanos amt)) (t/plus-period (odt-ldt x) amt 1))))
+              ([x n unit] (orewrap x (t/plus-unit (odt-ldt x) (u/->long n) (unit-nm unit)))))
+   "minus" (fn ([x amt] (orewrap x (if (a/dur? amt) (l/ldt-plus-nanos (odt-ldt x) (- (a/dur-total-nanos amt))) (t/plus-period (odt-ldt x) amt -1))))
+               ([x n unit] (orewrap x (t/plus-unit (odt-ldt x) (- (u/->long n)) (unit-nm unit)))))
+   "until" (fn [x o unit] (t/unit-between (unit-nm unit) (odt-ldt x) (odt-ldt o)))
+   "with" (fn ([x adj] (orewrap x (t/apply-adjuster (odt-ldt x) adj)))
+              ([x f v] (orewrap x (t/with-field (odt-ldt x) (e/cf-name f) (u/->long v)))))
+   "isSupported" (fn [x a] (is-supported (odt-ldt x) a))
+   "range" (fn [x f] (t/temporal-range (odt-ldt x) (e/cf-name f)))
+   "isEqual" (fn [x o] (= (odt->nanos x) (other-nanos o)))
+   "hashCode" (fn [x] (hash (odt->nanos x)))})

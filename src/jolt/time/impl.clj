@@ -60,6 +60,18 @@
 (defn field [v k] (host/ref-get v k))
 (defn type-of [v] (and (host/table? v) (host/ref-get v type-key)))
 
+(defn clock-millis
+  "Current epoch millis honoring a Clock argument (system/fixed/offset/tick), or
+  the wall clock for nil / a non-clock. tick's `now`/`today` pass *clock* here."
+  [c]
+  (if (and (host/table? c) (= :jolt.time/clock (host/ref-get c type-key)))
+    (case (field c :kind)
+      :fixed (field c :ms)
+      :offset (+ (clock-millis (field c :base)) (field c :ms))
+      :tick (let [m (clock-millis (field c :base)) dm (field c :ms)] (if (pos? dm) (* (quot m dm) dm) m))
+      (System/currentTimeMillis))
+    (System/currentTimeMillis)))
+
 (defn jt?
   "Is v one of our java.time values?"
   [v]
@@ -93,6 +105,32 @@
   (__register-instance-check!
    (fn [class-name v]
      (when (jt? v)
-       (boolean (contains? (:classes (spec-of v)) class-name))))))
+       (boolean (contains? (:classes (spec-of v)) class-name)))))
+  ;; (class x)/(type x) and — crucially — protocol dispatch on these values, which
+  ;; keys on value-host-tags. Without this a value's class is :object and
+  ;; (extend-protocol P java.time.X …) never fires (tick extends its protocols this way).
+  (__register-class!
+   jt?
+   (fn [x] (get type->class (type-of x) "java.lang.Object"))
+   (fn [x] (vec (:classes (spec-of x))))))
+
+(def ^:private type->class
+  {:jolt.time/month "java.time.Month" :jolt.time/day-of-week "java.time.DayOfWeek"
+   :jolt.time/chrono-unit "java.time.temporal.ChronoUnit" :jolt.time/chrono-field "java.time.temporal.ChronoField"
+   :jolt.time/value-range "java.time.temporal.ValueRange"
+   :jolt.time/local-date "java.time.LocalDate" :jolt.time/local-time "java.time.LocalTime"
+   :jolt.time/local-date-time "java.time.LocalDateTime"
+   :jolt.time/duration "java.time.Duration" :jolt.time/period "java.time.Period"
+   :jolt.time/year "java.time.Year" :jolt.time/year-month "java.time.YearMonth" :jolt.time/month-day "java.time.MonthDay"
+   :jolt.time/instant "java.time.Instant"
+   :jolt.time/zone-offset "java.time.ZoneOffset" :jolt.time/zone-id "java.time.ZoneId"
+   :jolt.time/zone-rules "java.time.zone.ZoneRules"
+   :jolt.time/zoned-date-time "java.time.ZonedDateTime" :jolt.time/offset-date-time "java.time.OffsetDateTime"
+   :jolt.time/offset-time "java.time.OffsetTime"
+   :jolt.time/temporal-adjuster "java.time.temporal.TemporalAdjuster"
+   :jolt.time/dt-formatter "java.time.format.DateTimeFormatter"
+   :jolt.time/locale "java.util.Locale" :jolt.time/format-style "java.time.format.FormatStyle"
+   :jolt.time/dtf-builder "java.time.format.DateTimeFormatterBuilder"
+   :jolt.time/clock "java.time.Clock"})
 
 (defonce ^:private installed (install-seams!))

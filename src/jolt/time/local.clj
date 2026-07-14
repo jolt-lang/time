@@ -110,7 +110,7 @@
    "ofEpochDay" (fn [n] (local-date (u/->long n)))
    "ofYearDay"  (fn [y doy] (local-date (+ (days-from-civil (u/->long y) 1 1) (dec (u/->long doy)))))
    "parse"      (fn [s & _] (local-date (parse-iso-date (str s))))
-   "now"        (fn [& _] (ld-from-ms (System/currentTimeMillis)))
+   "now"        (fn [& args] (ld-from-ms (impl/clock-millis (first args))))
    "MIN"        (ld-of -999999999 1 1)
    "MAX"        (ld-of 999999999 12 31)})
 
@@ -185,7 +185,7 @@
    "ofNanoOfDay"  (fn [n] (local-time (u/->long n)))
    "ofSecondOfDay" (fn [n] (local-time (* (u/->long n) nps)))
    "parse"        (fn [s & _] (local-time (u/parse-hms->nano (str s))))
-   "now"          (fn [& _] (local-time (* (u/floor-mod (System/currentTimeMillis) 86400000) 1000000)))
+   "now"          (fn [& args] (local-time (* (u/floor-mod (impl/clock-millis (first args)) 86400000) 1000000)))
    "MIN"          (local-time 0)
    "MAX"          (local-time (dec npd))
    "MIDNIGHT"     (local-time 0)
@@ -278,6 +278,6 @@
                        (local-dt (u/floor-div es 86400) (+ (* (u/floor-mod es 86400) nps) (u/->long nano)))))
    "parse"   (fn [s & _] (let [d (str s) t (.indexOf d "T")]
                            (local-dt (parse-iso-date (subs d 0 t)) (u/parse-hms->nano (subs d (inc t))))))
-   "now"     (fn [& _] (let [ms (System/currentTimeMillis)] (local-dt (u/floor-div ms 86400000) (* (u/floor-mod ms 86400000) 1000000))))
+   "now"     (fn [& args] (let [ms (impl/clock-millis (first args))] (local-dt (u/floor-div ms 86400000) (* (u/floor-mod ms 86400000) 1000000))))
    "MIN"     (local-dt (days-from-civil -999999999 1 1) 0)
    "MAX"     (local-dt (days-from-civil 999999999 12 31) (dec npd))})

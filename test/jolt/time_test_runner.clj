@@ -1,7 +1,9 @@
 (ns jolt.time-test-runner
   "Run tick's suite plus the migrated jolt java.time cases and exit non-zero on
-  any failure, error, or namespace that fails to load."
-  (:require [clojure.test :as test]))
+  any failure, error, or namespace that fails to load. jolt.time is required first
+  so the java.time host shim is installed before tick loads."
+  (:require [clojure.test :as test]
+            [jolt.time]))
 
 (def suites
   '[tick.api-test

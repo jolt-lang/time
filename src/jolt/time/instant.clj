@@ -5,6 +5,7 @@
             [jolt.time.util :as u]
             [jolt.time.enums :as e]
             [jolt.time.local :as l]
+            [jolt.time.amount :as a]
             [jolt.time.temporal :as t]))
 
 (def ^:private nps u/nanos-per-sec)
@@ -75,7 +76,7 @@
 
 (defn- statics! [names members] (doseq [n names] (__register-class-statics! n members)))
 (statics! ["Instant" "java.time.Instant"]
-  {"now"          (fn [& _] (instant (* (System/currentTimeMillis) 1000000)))
+  {"now"          (fn [& args] (instant (* (impl/clock-millis (first args)) 1000000)))
    "ofEpochMilli" (fn [ms] (instant (* (u/->long ms) 1000000)))
    "ofEpochSecond" (fn ([s] (instant (* (u/->long s) nps)))
                        ([s nano] (instant (+ (* (u/->long s) nps) (u/->long nano)))))
@@ -101,3 +102,5 @@
 ;; the deferred LocalDateTime.toInstant (UTC): now that Instant exists
 (__register-class-methods! :jolt.time/local-date-time
   {"toInstant" (fn [x & _] (instant (* (l/ldt->ms x) 1000000)))})
+
+(a/register-nanos! :jolt.time/instant inst-nanos)

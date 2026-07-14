@@ -297,3 +297,13 @@
 (__register-class-methods! :jolt.time/period
   {"addTo" (fn [p t] (plus-period t p 1))
    "subtractFrom" (fn [p t] (plus-period t p -1))})
+
+;; TemporalAmount.getUnits/get (tick's t/units iterates these)
+(__register-class-methods! :jolt.time/duration
+  {"getUnits" (fn [_] [(e/chrono-unit "SECONDS") (e/chrono-unit "NANOS")])
+   "get" (fn [d u] (case (e/cu-name u) "SECONDS" (a/dur-secs d) "NANOS" (a/dur-nanos d)
+                        (throw (ex-info (str "Duration has no unit " (e/cu-name u)) {}))))})
+(__register-class-methods! :jolt.time/period
+  {"getUnits" (fn [_] [(e/chrono-unit "YEARS") (e/chrono-unit "MONTHS") (e/chrono-unit "DAYS")])
+   "get" (fn [p u] (case (e/cu-name u) "YEARS" (a/per-years p) "MONTHS" (a/per-months p) "DAYS" (a/per-days p)
+                        (throw (ex-info (str "Period has no unit " (e/cu-name u)) {}))))})

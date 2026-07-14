@@ -3,11 +3,13 @@
   temporals; month/day display names are English by default, or locale-specific
   through the core jolt.host/locale-name (strftime) primitive."
   (:require [jolt.host :as host]
-            [jolt.time.impl :as impl :refer [civil-from-days]]
+            [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
             [jolt.time.util :as u]
             [jolt.time.local :as l]
+            [jolt.time.year :as y]
             [jolt.time.instant :as inst]
-            [jolt.time.zones :as z]))
+            [jolt.time.zones :as z]
+            [jolt.time.zoned :as zd]))
 
 (defn- statics! [names members] (doseq [n names] (__register-class-statics! n members)))
 
@@ -148,6 +150,11 @@
    "ISO_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ss" "en")
    "ISO_INSTANT" (formatter "yyyy-MM-dd'T'HH:mm:ssX" "en")
    "ISO_OFFSET_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ssXXX" "en")
+   "ISO_OFFSET_TIME" (formatter "HH:mm:ssXXX" "en")
+   "ISO_OFFSET_DATE" (formatter "yyyy-MM-ddXXX" "en")
+   "ISO_ZONED_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ss.SSSXXX'['VV']'" "en")
+   "ISO_ORDINAL_DATE" (formatter "yyyy-DDD" "en")
+   "ISO_WEEK_DATE" (formatter "yyyy-'W'ww-e" "en")
    "BASIC_ISO_DATE" (formatter "yyyyMMdd" "en")
    "RFC_1123_DATE_TIME" (formatter "EEE, dd MMM yyyy HH:mm:ss Z" "en")
    "ofLocalizedDate" (fn [fs] (style-fmt :date fs))
@@ -168,3 +175,47 @@
    "parseCaseInsensitive" (fn [b] b) "parseLenient" (fn [b] b)
    "optionalStart" (fn [b] b) "optionalEnd" (fn [b] b)
    "toFormatter" (fn [b & _] (formatter @(impl/field b :pattern) "en"))})
+
+;; --- pattern-based parse -----------------------------------------------------
+;; Walk the pattern and input together: pattern letters consume digits into fields;
+;; literals (quoted or plain) must match. Returns {:year :month :day :hour :min
+;; :sec :nano :off}. Good enough for tick's parse-* with a custom formatter.
+(defn parse-with-pattern [pattern s]
+  (let [n (count pattern) sl (count s)]
+    (letfn [(run-len [i c] (loop [j i] (if (and (< j n) (= (nth pattern j) c)) (recur (inc j)) (- j i))))
+            (digits [si k] (loop [j si acc 0 got 0]
+                             (if (and (< j sl) (>= (int (nth s j)) 48) (<= (int (nth s j)) 57) (< got k))
+                               (recur (inc j) (+ (* acc 10) (- (int (nth s j)) 48)) (inc got))
+                               [acc j])))]
+      (loop [i 0 si 0 f {:year 0 :month 1 :day 1 :hour 0 :min 0 :sec 0 :nano 0 :off 0}]
+        (if (>= i n) f
+          (let [c (nth pattern i) k (run-len i c)]
+            (cond
+              (= c \') (let [[j o] (scan-quote pattern i n "")]  ; the literal to match
+                         (recur j (+ si (count o)) f))
+              (= c \y) (let [[v si'] (digits si (max k 4))] (recur (+ i k) si' (assoc f :year (if (<= k 2) (+ 2000 v) v))))
+              (= c \M) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :month v)))
+              (= c \d) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :day v)))
+              (= c \H) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :hour v)))
+              (= c \m) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :min v)))
+              (= c \s) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :sec v)))
+              (= c \S) (let [[v si'] (digits si k)] (recur (+ i k) si' (assoc f :nano (* v (u/pow10 (max 0 (- 9 k)))))))
+              (or (= c \V) (= c \X) (= c \Z) (= c \z))
+                (if (and (< si sl) (#{\Z \z} (nth s si)))
+                  (recur (+ i k) (inc si) (assoc f :off 0))
+                  (let [end (loop [j si] (if (and (< j sl) (or (#{\+ \- \:} (nth s j)) (and (>= (int (nth s j)) 48) (<= (int (nth s j)) 57)))) (recur (inc j)) j))]
+                    (recur (+ i k) end (assoc f :off (if (> end si) (z/parse-zone-offset (subs s si end)) 0)))))
+              :else (recur (inc i) (inc si) f))))))))
+
+(defn- fmt-of [f] (if (and (impl/jt? f) (fmt? f)) (fmt-pattern f) (str f)))
+(defn- pfields [fmt s] (parse-with-pattern (fmt-of fmt) (str s)))
+
+;; formatter-aware parse, overriding the ISO-only statics for the 2-arg case.
+(defn- ldt-of [f] (l/local-dt (days-from-civil (:year f) (:month f) (:day f))
+                              (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f))))
+(statics! ["LocalDate" "java.time.LocalDate"] {"parse" (fn [s & fmt] (if (seq fmt) (let [f (pfields (first fmt) s)] (l/local-date (days-from-civil (:year f) (:month f) (:day f)))) (l/local-date (l/parse-iso-date (str s)))))})
+(statics! ["LocalTime" "java.time.LocalTime"] {"parse" (fn [s & fmt] (if (seq fmt) (let [f (pfields (first fmt) s)] (l/local-time (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f)))) (l/local-time (u/parse-hms->nano (str s)))))})
+(statics! ["LocalDateTime" "java.time.LocalDateTime"] {"parse" (fn [s & fmt] (if (seq fmt) (ldt-of (pfields (first fmt) s)) (let [d (str s) ti (.indexOf d "T")] (l/local-dt (l/parse-iso-date (subs d 0 ti)) (u/parse-hms->nano (subs d (inc ti)))))))})
+(statics! ["YearMonth" "java.time.YearMonth"] {"parse" (fn [s & fmt] (if (seq fmt) (let [f (pfields (first fmt) s)] (y/year-month (:year f) (:month f))) (y/year-month (u/digits-at (str s) 0 4) (u/digits-at (str s) 5 2))))})
+(statics! ["ZonedDateTime" "java.time.ZonedDateTime"] {"parse" (fn [s & fmt] (if (seq fmt) (let [f (pfields (first fmt) s) local (+ (* (days-from-civil (:year f) (:month f) (:day f)) u/nanos-per-day) (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f))) utc (- local (* (:off f) u/nanos-per-sec))] (zd/zoned-of-instant utc (z/zo-id (:off f)))) (zd/zoned-of-instant (inst/parse-iso-instant (str s)) "Z")))})
+(statics! ["OffsetDateTime" "java.time.OffsetDateTime"] {"parse" (fn [s & fmt] (if (seq fmt) (let [f (pfields (first fmt) s)] (zd/odt (days-from-civil (:year f) (:month f) (:day f)) (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f)) (:off f))) (let [nanos (inst/parse-iso-instant (str s))] (zd/odt (u/floor-div nanos u/nanos-per-day) (u/floor-mod nanos u/nanos-per-day) 0))))})

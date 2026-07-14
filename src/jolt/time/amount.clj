@@ -26,12 +26,16 @@
 (defn- of-total-nanos [tn] (normalize (u/floor-div tn nps) (u/floor-mod tn nps)))
 
 ;; nanos of a temporal on its own timeline (local layer: date=day, time=nano-of-day).
+;; instant/zoned/offset register their own nanos via register-nanos! (they load later).
+(defonce nanos-fns (atom {}))
+(defn register-nanos! [type-kw f] (swap! nanos-fns assoc type-kw f))
 (defn temporal-nanos [t]
   (condp = (impl/type-of t)
     :jolt.time/local-date      (* (l/ld-epoch-day t) u/nanos-per-day)
     :jolt.time/local-date-time (+ (* (l/ldt-epoch-day t) u/nanos-per-day) (l/ldt-nod t))
     :jolt.time/local-time      (l/lt-nano-of-day t)
-    (throw (ex-info "Duration/between: unsupported temporal" {:t t}))))
+    (if-let [f (get @nanos-fns (impl/type-of t))] (f t)
+      (throw (ex-info "Duration/between: unsupported temporal" {:t t})))))
 
 (defn- dur-frac-digits [nano]
   (let [s9 (u/pad-left (str nano) 9)]
