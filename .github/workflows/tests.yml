@@ -9,7 +9,13 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y liblz4-1 zlib1g libtinfo6
+          sudo apt-get install -y liblz4-1 zlib1g libtinfo6 locales
+          # jolt's DateTimeFormatter localizes month/day names through libc
+          # strftime, so a non-English locale must be installed on the OS (the JVM
+          # bundles this; jolt, like babashka, does not). tick's suite formats a
+          # French month name.
+          sudo locale-gen fr_FR.UTF-8
+          sudo update-locale
           url=$(curl -fsSL https://api.github.com/repos/jolt-lang/jolt/releases/latest \
                 | jq -r '.assets[] | select(.name | test("x86_64-linux\\.tar\\.gz$")) | .browser_download_url')
           mkdir -p "$HOME/.jolt"
