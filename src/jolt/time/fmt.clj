@@ -128,10 +128,24 @@
   (__register-class-methods! tk {"format" (fn [self f] (do-format f self))}))
 
 ;; java.util.Locale, java.time.format.FormatStyle
+;; java.util.Locale lives here, not in jolt core: it is only meaningful for
+;; formatting, which is this library (RFC 0008). Carry the constants and
+;; getDefault/setDefault the surface needs (tick asks for Locale/getDefault); the
+;; base default is English.
 (statics! ["Locale" "java.util.Locale"]
-  {"ENGLISH" (impl/value :jolt.time/locale {:id "en"}) "US" (impl/value :jolt.time/locale {:id "en"})
-   "FRENCH" (impl/value :jolt.time/locale {:id "fr"}) "GERMAN" (impl/value :jolt.time/locale {:id "de"})
-   "forLanguageTag" (fn [tag] (impl/value :jolt.time/locale {:id (str tag)}))})
+  {"getDefault" (fn [& _] (impl/value :jolt.time/locale {:id "en"}))
+   "setDefault" (fn [_] nil)
+   "forLanguageTag" (fn [tag] (impl/value :jolt.time/locale {:id (str tag)}))
+   "ENGLISH" (impl/value :jolt.time/locale {:id "en"}) "US" (impl/value :jolt.time/locale {:id "en-US"})
+   "FRENCH" (impl/value :jolt.time/locale {:id "fr"}) "FRANCE" (impl/value :jolt.time/locale {:id "fr-FR"})
+   "GERMAN" (impl/value :jolt.time/locale {:id "de"}) "GERMANY" (impl/value :jolt.time/locale {:id "de-DE"})
+   "ITALIAN" (impl/value :jolt.time/locale {:id "it"}) "ITALY" (impl/value :jolt.time/locale {:id "it-IT"})
+   "JAPANESE" (impl/value :jolt.time/locale {:id "ja"}) "JAPAN" (impl/value :jolt.time/locale {:id "ja-JP"})
+   "KOREAN" (impl/value :jolt.time/locale {:id "ko"}) "KOREA" (impl/value :jolt.time/locale {:id "ko-KR"})
+   "CHINESE" (impl/value :jolt.time/locale {:id "zh"}) "CHINA" (impl/value :jolt.time/locale {:id "zh-CN"})
+   "SIMPLIFIED_CHINESE" (impl/value :jolt.time/locale {:id "zh-CN"}) "TRADITIONAL_CHINESE" (impl/value :jolt.time/locale {:id "zh-TW"})
+   "UK" (impl/value :jolt.time/locale {:id "en-GB"}) "CANADA" (impl/value :jolt.time/locale {:id "en-CA"})
+   "CANADA_FRENCH" (impl/value :jolt.time/locale {:id "fr-CA"}) "ROOT" (impl/value :jolt.time/locale {:id ""})})
 (__register-class-ctor! "Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
 (__register-class-ctor! "java.util.Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
 (impl/register-type! :jolt.time/locale

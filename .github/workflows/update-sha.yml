@@ -1,0 +1,67 @@
+name: update readme sha
+
+# When a release tag is pushed, rewrite the :git/sha in the copy-paste deps.edn
+# snippets so they point at the tagged commit. Keeps the README and the docs site
+# from handing users a stale sha that errors on paste.
+#
+# The docs-site step pushes to the separate jolt-lang.github.io repo, so it needs
+# a Personal Access Token with contents:write on that repo, stored in this repo's
+# secrets as SITE_DEPLOY_TOKEN. Without the secret that step no-ops (the checkout
+# fails soft is not automatic, so the secret must exist for the site to update).
+# The site's own deploy workflow regenerates the HTML from the updated markdown.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-sha:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve the released sha
+        id: sha
+        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      # 1. This repo's README, on the default branch.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Update README sha
+        run: |
+          set -euo pipefail
+          sed -i -E 's#:git/sha "[0-9a-f]{7,40}"#:git/sha "${{ steps.sha.outputs.sha }}"#g' README.md
+          if [ -n "$(git status --porcelain README.md)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add README.md
+            git commit -m "docs: pin README example to ${{ steps.sha.outputs.sha }} [skip ci]"
+            git push
+          fi
+
+      # 2. The docs site (separate repo). Only the pages that reference
+      #    io.github.jolt-lang/time are touched; getting-started.md carries an
+      #    unrelated example sha and is deliberately left out of the list.
+      - uses: actions/checkout@v4
+        with:
+          repository: jolt-lang/jolt-lang.github.io
+          ref: main
+          token: ${{ secrets.SITE_DEPLOY_TOKEN }}
+          path: site
+      - name: Update site docs sha
+        run: |
+          set -euo pipefail
+          cd site
+          for f in resources/md/api/time.md resources/md/rfc/0008-time-core-library-split.md; do
+            [ -f "$f" ] && sed -i -E 's#:git/sha "[0-9a-f]{7,40}"#:git/sha "${{ steps.sha.outputs.sha }}"#g' "$f"
+          done
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -m "docs: pin jolt-lang/time example to ${{ steps.sha.outputs.sha }}"
+            git push
+          fi
