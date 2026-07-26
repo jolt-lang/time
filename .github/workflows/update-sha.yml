@@ -4,10 +4,12 @@ name: update readme sha
 # snippets so they point at the tagged commit. Keeps the README and the docs site
 # from handing users a stale sha that errors on paste.
 #
-# The docs-site step pushes to the separate jolt-lang.github.io repo, so it needs
+# The docs-site steps push to the separate jolt-lang.github.io repo, so they need
 # a Personal Access Token with contents:write on that repo, stored in this repo's
-# secrets as SITE_DEPLOY_TOKEN. Without the secret that step no-ops (the checkout
-# fails soft is not automatic, so the secret must exist for the site to update).
+# secrets as SITE_DEPLOY_TOKEN. They are skipped when the secret is absent —
+# actions/checkout of another repo errors with "Input required and not supplied:
+# token" on an empty one, which failed the whole run and left the README update
+# (which needs no secret, and had already succeeded) looking broken.
 # The site's own deploy workflow regenerates the HTML from the updated markdown.
 
 on:
@@ -45,13 +47,25 @@ jobs:
       # 2. The docs site (separate repo). Only the pages that reference
       #    io.github.jolt-lang/time are touched; getting-started.md carries an
       #    unrelated example sha and is deliberately left out of the list.
+      #    Skipped without the token, so a release still succeeds and step 1 stands.
+      - name: Token present?
+        id: site_token
+        run: |
+          if [ -n "${{ secrets.SITE_DEPLOY_TOKEN }}" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SITE_DEPLOY_TOKEN is not set — skipping the docs-site sha update."
+          fi
       - uses: actions/checkout@v4
+        if: steps.site_token.outputs.present == 'true'
         with:
           repository: jolt-lang/jolt-lang.github.io
           ref: main
           token: ${{ secrets.SITE_DEPLOY_TOKEN }}
           path: site
       - name: Update site docs sha
+        if: steps.site_token.outputs.present == 'true'
         run: |
           set -euo pipefail
           cd site
