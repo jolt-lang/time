@@ -26,7 +26,7 @@ tick API.
 ## Test
 
 ```
-joltc -M:test
+jolt -M:test
 ```
 
 Runs tick's own suite plus the migrated jolt `java.time` cases. tick, spec.alpha,
