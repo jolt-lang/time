@@ -17,4 +17,4 @@
   :stage {:extra-paths ["test"]
           :main-opts ["-m" "jolt.time.stage-test"]}}
 
- :tasks {test "joltc -M:test"}}
+ :tasks {test "jolt -M:test"}}
