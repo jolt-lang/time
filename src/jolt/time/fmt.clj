@@ -113,6 +113,9 @@
   (cond (and (impl/jt? l) (= :jolt.time/locale (impl/type-of l))) (impl/field l :id)
         (string? l) l :else "en"))
 
+;; .parse below calls the pattern parser defined further down in this file.
+(declare parse-with-pattern)
+
 (__register-class-methods! :jolt.time/dt-formatter
   {"format" (fn [self v] (format-pattern (fmt-pattern self) v (fmt-locale self)))
    "withLocale" (fn [self l] (formatter (fmt-pattern self) (locale-id l)))

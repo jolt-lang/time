@@ -18,6 +18,11 @@
 
 (defn- offset-suffix [secs] (z/zo-id secs))
 
+;; the ZonedDateTime methods below call the OffsetDateTime constructor
+;; (toOffsetDateTime), which the OffsetDateTime section defines further down.
+;; Declare it so the reference resolves when the method map is compiled.
+(declare odt)
+
 ;; --- ZonedDateTime -----------------------------------------------------------
 (defn zdt [ed nod off zid] (impl/value :jolt.time/zoned-date-time {:ed ed :nod nod :off off :zid zid}))
 (defn- zdt-ed [x] (impl/field x :ed))
