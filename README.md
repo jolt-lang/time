@@ -14,7 +14,7 @@ tick API.
 ```clojure
 ;; deps.edn
 {:deps {io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                                  :git/sha "4bd08de1d8cb94aa19a4091e4e2523eca4a9a4c9"}}}
+                                  :git/sha "70dfb7981ef4ed70c5d142109d56a90edfb79cef"}}}
 ```
 
 ```clojure
