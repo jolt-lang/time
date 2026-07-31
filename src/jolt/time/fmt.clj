@@ -176,6 +176,30 @@
   {:eq (fn [a b] (= (impl/field a :id) (impl/field b :id))) :hash (fn [l] (hash (impl/field l :id)))
    :str (fn [l] (impl/field l :id)) :cmp nil :classes #{"java.util.Locale" "Locale"}})
 
+;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
+;; :date-names extension point and carries ROOT alone, because core has no locale
+;; data of its own. Hand it the bundled tables so an explicit locale renders in its
+;; own language there too, not only through this library's DateTimeFormatter.
+;;
+;; Guarded on the point existing, so a jolt older than it still loads this library
+;; and simply keeps ROOT names in SimpleDateFormat. The guard is deliberately
+;; narrow: it swallows the one "not declared" case and rethrows anything else, so a
+;; genuine error in a provider still surfaces.
+(defn- register-date-names! []
+  (when-let [reg (resolve 'jolt.host/register-extension!)]
+    (doseq [[id spec] ld/locales :when (not= id "")]
+      (reg :date-names id
+           {:months (:months spec) :months-short (:months-short spec)
+            :days (:days spec) :days-short (:days-short spec)}))
+    true))
+
+(defonce ^:private date-names-registered
+  (try (boolean (register-date-names!))
+       (catch Exception e
+         (if (re-find #"no extension point" (or (ex-message e) ""))
+           false
+           (throw e)))))
+
 (def ^:private style-key {"SHORT" :short "MEDIUM" :medium "LONG" :long "FULL" :full})
 (statics! ["FormatStyle" "java.time.format.FormatStyle"]
   (into {} (map (fn [s] [s (impl/value :jolt.time/format-style {:style s})]) ["SHORT" "MEDIUM" "LONG" "FULL"])))
