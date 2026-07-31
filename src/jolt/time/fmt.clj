@@ -7,6 +7,7 @@
             [jolt.host :as host]
             [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
             [jolt.time.locale-data :as ld]
+            [jolt.time.number-data :as nd]
             [jolt.time.util :as u]
             [jolt.time.local :as l]
             [jolt.time.year :as y]
@@ -185,20 +186,36 @@
 ;; and simply keeps ROOT names in SimpleDateFormat. The guard is deliberately
 ;; narrow: it swallows the one "not declared" case and rethrows anything else, so a
 ;; genuine error in a provider still surfaces.
-(defn- register-date-names! []
+;; The same applies to the other two locale-sensitive surfaces core declares:
+;; :number-symbols (String/format's decimal and grouping separators) and
+;; :currency-data (NumberFormat/getCurrencyInstance). All three are fed from the
+;; bundled tables here, because core carries ROOT alone for each.
+;;
+;; A point core does not declare is skipped rather than failing the load, so this
+;; library keeps working against a jolt that has only some of them.
+(defn- register-point! [reg point entries]
+  (try
+    (doseq [[id data] entries :when (not= id "")]
+      (reg point id data))
+    true
+    (catch Exception e
+      (if (re-find #"no extension point" (or (ex-message e) ""))
+        false
+        (throw e)))))
+
+(defn- register-locale-points! []
   (when-let [reg (resolve 'jolt.host/register-extension!)]
-    (doseq [[id spec] ld/locales :when (not= id "")]
-      (reg :date-names id
-           {:months (:months spec) :months-short (:months-short spec)
-            :days (:days spec) :days-short (:days-short spec)}))
+    (register-point! reg :date-names
+      (for [[id spec] ld/locales]
+        [id {:months (:months spec) :months-short (:months-short spec)
+             :days (:days spec) :days-short (:days-short spec)}]))
+    (register-point! reg :number-symbols nd/number-symbols)
+    (register-point! reg :currency-data nd/currency)
     true))
 
-(defonce ^:private date-names-registered
-  (try (boolean (register-date-names!))
-       (catch Exception e
-         (if (re-find #"no extension point" (or (ex-message e) ""))
-           false
-           (throw e)))))
+;; register-point! already tolerates an undeclared point per point, so this only
+;; has to run once.
+(defonce ^:private locale-points-registered (boolean (register-locale-points!)))
 
 (def ^:private style-key {"SHORT" :short "MEDIUM" :medium "LONG" :long "FULL" :full})
 (statics! ["FormatStyle" "java.time.format.FormatStyle"]
