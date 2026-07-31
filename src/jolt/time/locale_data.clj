@@ -3,9 +3,9 @@
   the lookups over it. Per locale id: :patterns keyed by [kind style] with kind
   :date/:time/:date-time and style :short/:medium/:long/:full, and :months,
   :months-short, :days, :days-short name tables (months January-first, days
-  Monday-first). Ids are BCP-47-ish \"lang-COUNTRY\"; \"\" is ROOT. ROOT's wide
-  month/day names are the full English names the reference JVM renders (Selmer
-  accepts either CLDR shape).")
+  Monday-first). Ids are BCP-47-ish \"lang-COUNTRY\"; \"\" is ROOT. Every value is
+  as the reference JVM renders it, including ROOT's wide month/day names, which
+  CLDR abbreviates ("Mar", "Sat") rather than spelling out.")
 
 (def locales
   {""
@@ -23,18 +23,18 @@
    [:time :short] "HH:mm",
    [:date-time :medium] "y MMM d HH:mm:ss"},
   :months
-  ["January"
-   "February"
-   "March"
-   "April"
+  ["Jan"
+   "Feb"
+   "Mar"
+   "Apr"
    "May"
-   "June"
-   "July"
-   "August"
-   "September"
-   "October"
-   "November"
-   "December"],
+   "Jun"
+   "Jul"
+   "Aug"
+   "Sep"
+   "Oct"
+   "Nov"
+   "Dec"],
   :months-short
   ["Jan"
    "Feb"
@@ -48,14 +48,7 @@
    "Oct"
    "Nov"
    "Dec"],
-  :days
-  ["Monday"
-   "Tuesday"
-   "Wednesday"
-   "Thursday"
-   "Friday"
-   "Saturday"
-   "Sunday"],
+  :days ["Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"],
   :days-short ["Mon" "Tue" "Wed" "Thu" "Fri" "Sat" "Sun"]},
  "nl"
  {:patterns
