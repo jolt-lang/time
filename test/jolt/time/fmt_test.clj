@@ -25,5 +25,41 @@
   (is (= "Mar 5, 2020" (.format (DateTimeFormatter/ofLocalizedDate FormatStyle/MEDIUM) (LocalDate/of 2020 3 5))))
   (is (string? (.format (.withLocale (DateTimeFormatter/ofPattern "yyyy") (java.util.Locale. "en")) (LocalDate/of 2020 1 1)))))
 
+(deftest localized-per-locale
+  ;; Selmer's locale date assertions, as produced by the reference JVM; the date
+  ;; is 2014-03-01T00:00. Note (java.util.Locale. "en_US") is a malformed
+  ;; *language* subtag and resolves to ROOT (ISO-ish patterns), not to English
+  ;; and not to US.
+  (let [d (LocalDateTime/of 2014 3 1 0 0 0)
+        fmt (fn [f id] (.format (.withLocale f (java.util.Locale. id)) d))]
+    ;; month name from the bundled table; no OS locale needed
+    (is (= "mars" (fmt (DateTimeFormatter/ofPattern "MMMM") "fr")))
+    (is (= "00:00" (fmt (DateTimeFormatter/ofLocalizedTime FormatStyle/SHORT) "en_US")))
+    (is (= "00:00" (fmt (DateTimeFormatter/ofLocalizedTime FormatStyle/SHORT) "zh")))
+    (is (= "2014-03-01" (fmt (DateTimeFormatter/ofLocalizedDate FormatStyle/SHORT) "en_US")))
+    (is (= "2014/3/1" (fmt (DateTimeFormatter/ofLocalizedDate FormatStyle/SHORT) "zh")))
+    (is (= "2014-03-01 00:00" (fmt (DateTimeFormatter/ofLocalizedDateTime FormatStyle/SHORT) "en_US")))
+    (is (= "2014/3/1 00:00" (fmt (DateTimeFormatter/ofLocalizedDateTime FormatStyle/SHORT) "zh")))
+    (is (= "2014年3月1日 00:00:00" (fmt (DateTimeFormatter/ofLocalizedDateTime FormatStyle/MEDIUM) "zh")))
+    (is (= "2014年3月1日" (fmt (DateTimeFormatter/ofLocalizedDate FormatStyle/LONG) "zh")))
+    (is (= "2014 March 1" (fmt (DateTimeFormatter/ofLocalizedDate FormatStyle/LONG) "en_US")))
+    ;; day name from the bundled table; 2014-03-01 is a Saturday
+    (is (= "星期六" (fmt (DateTimeFormatter/ofPattern "EEEE") "zh")))))
+
+(deftest localized-resolution
+  (let [d (LocalDate/of 2014 3 1)
+        short-date (fn [locale] (.format (.withLocale (DateTimeFormatter/ofLocalizedDate FormatStyle/SHORT) locale) d))]
+    ;; narrowing: zh-CN has no entry of its own and falls back to zh
+    (is (= "2014年3月1日"
+           (.format (.withLocale (DateTimeFormatter/ofLocalizedDate FormatStyle/LONG) (java.util.Locale. "zh" "CN")) d)))
+    ;; a well-formed but unknown id lands on ROOT
+    (is (= "2014-03-01" (short-date (java.util.Locale. "tlh"))))
+    (is (= "2014-03-01" (short-date (java.util.Locale. "xx" "YY"))))
+    ;; US proper is not ROOT
+    (is (= "3/1/14" (short-date (java.util.Locale. "en" "US"))))
+    ;; the two-arg ctor joins language and country like the constants do
+    (is (= "01.03.14" (short-date (java.util.Locale. "de" "DE"))))
+    (is (= (short-date (java.util.Locale. "de" "DE")) (short-date java.util.Locale/GERMANY)))))
+
 (deftest via-temporal-method
   (is (= "2020-03-05" (.format (LocalDate/of 2020 3 5) (DateTimeFormatter/ofPattern "yyyy-MM-dd")))))
