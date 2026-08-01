@@ -1,9 +1,13 @@
 (ns jolt.time.fmt
   "DateTimeFormatter + DateTimeFormatterBuilder. A pattern engine over the library
-  temporals; month/day display names are English by default, or locale-specific
-  through the core jolt.host/locale-name (strftime) primitive."
-  (:require [jolt.host :as host]
+  temporals; localized patterns and month/day display names come from the
+  bundled jolt.time.locale-data tables (measured from the reference JVM), with
+  the core jolt.host/locale-name (strftime) primitive as a last resort."
+  (:require [clojure.string :as str]
+            [jolt.host :as host]
             [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
+            [jolt.time.locale-data :as ld]
+            [jolt.time.number-data :as nd]
             [jolt.time.util :as u]
             [jolt.time.local :as l]
             [jolt.time.year :as y]
@@ -19,13 +23,15 @@
 (def ^:private en-days ["Monday" "Tuesday" "Wednesday" "Thursday" "Friday" "Saturday" "Sunday"])
 
 (defn- month-name [locale mo full?]
-  (if (or (nil? locale) (= "en" locale))
-    (let [n (nth en-months (dec mo))] (if full? n (subs n 0 3)))
+  ;; bundled tables first: they are right everywhere; strftime depends on the OS
+  ;; having the locale installed and silently falls back to English when it does not
+  (if-let [names (ld/months locale full?)]
+    (nth names (dec mo))
     (or (host/locale-name locale (dec mo) 1 (if full? "%B" "%b"))
         (let [n (nth en-months (dec mo))] (if full? n (subs n 0 3))))))
 (defn- day-name [locale dow full?]
-  (if (or (nil? locale) (= "en" locale))
-    (let [n (nth en-days (dec dow))] (if full? n (subs n 0 3)))
+  (if-let [names (ld/days locale full?)]
+    (nth names (dec dow))
     (or (host/locale-name locale 0 (mod dow 7) (if full? "%A" "%a"))
         (let [n (nth en-days (dec dow))] (if full? n (subs n 0 3))))))
 
@@ -78,7 +84,9 @@
               (let [c (nth pattern i) k (run-len i c)]
                 (cond
                   (= c \') (let [[j o] (scan-quote pattern i n out)] (recur j o))
-                  (or (= c \y) (= c \Y)) (recur (+ i k) (str out (if (>= k 4) (u/pad4 y) (u/pad2 (mod y 100)))))
+                  ;; java.time year semantics: y is the full year, yy the reduced
+                  ;; two-digit form, yyy+ padded (CLDR localized patterns use bare y)
+                  (or (= c \y) (= c \Y)) (recur (+ i k) (str out (cond (= k 1) (str y) (= k 2) (u/pad2 (mod y 100)) :else (u/pad4 y))))
                   (= c \M) (recur (+ i k) (str out (cond (= k 1) (str mo) (= k 2) (u/pad2 mo) (= k 3) (month-name locale mo false) :else (month-name locale mo true))))
                   (= c \d) (recur (+ i k) (str out (if (= k 1) (str d) (u/pad2 d))))
                   (= c \E) (recur (+ i k) (str out (day-name locale dow (>= k 4))))
@@ -96,7 +104,10 @@
 
 ;; --- DateTimeFormatter -------------------------------------------------------
 (defn formatter [pattern locale] (impl/value :jolt.time/dt-formatter {:pattern pattern :locale (or locale "en")}))
-(defn- fmt-pattern [f] (impl/field f :pattern))
+(defn- fmt-pattern [f]
+  (or (impl/field f :pattern)
+      (let [[kind style] (impl/field f :style)]
+        (or (ld/pattern (impl/field f :locale) kind style) "yyyy-MM-dd HH:mm:ss"))))
 (defn- fmt-locale [f] (impl/field f :locale))
 (defn fmt? [f] (= :jolt.time/dt-formatter (impl/type-of f)))
 
@@ -118,7 +129,10 @@
 
 (__register-class-methods! :jolt.time/dt-formatter
   {"format" (fn [self v] (format-pattern (fmt-pattern self) v (fmt-locale self)))
-   "withLocale" (fn [self l] (formatter (fmt-pattern self) (locale-id l)))
+   "withLocale" (fn [self l] (impl/value :jolt.time/dt-formatter
+                                         {:pattern (impl/field self :pattern)
+                                          :style (impl/field self :style)
+                                          :locale (locale-id l)}))
    "withZone" (fn [self _z] self)
    "parse" (fn [self s] (let [f (parse-with-pattern (fmt-pattern self) (str s))]
                           (l/local-dt (days-from-civil (:year f) (:month f) (:day f))
@@ -149,23 +163,72 @@
    "SIMPLIFIED_CHINESE" (impl/value :jolt.time/locale {:id "zh-CN"}) "TRADITIONAL_CHINESE" (impl/value :jolt.time/locale {:id "zh-TW"})
    "UK" (impl/value :jolt.time/locale {:id "en-GB"}) "CANADA" (impl/value :jolt.time/locale {:id "en-CA"})
    "CANADA_FRENCH" (impl/value :jolt.time/locale {:id "fr-CA"}) "ROOT" (impl/value :jolt.time/locale {:id ""})})
-(__register-class-ctor! "Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
-(__register-class-ctor! "java.util.Locale" (fn [lang & _] (impl/value :jolt.time/locale {:id (str lang)})))
+;; the two-arg ctor joins language and country like the constants do ("de" "DE"
+;; -> "de-DE"); the one-arg ctor's argument is a *language* subtag, so "en_US"
+;; stays malformed and resolves to ROOT at lookup time
+(defn- locale-ctor [lang & r]
+  (let [lang (str/lower-case (str lang))]
+    (if (and (seq r) (seq (str (first r))))
+      (impl/value :jolt.time/locale {:id (str lang "-" (str/upper-case (str (first r))))})
+      (impl/value :jolt.time/locale {:id lang}))))
+(__register-class-ctor! "Locale" locale-ctor)
+(__register-class-ctor! "java.util.Locale" locale-ctor)
 (impl/register-type! :jolt.time/locale
   {:eq (fn [a b] (= (impl/field a :id) (impl/field b :id))) :hash (fn [l] (hash (impl/field l :id)))
    :str (fn [l] (impl/field l :id)) :cmp nil :classes #{"java.util.Locale" "Locale"}})
 
-(def ^:private style-patterns
-  {:date {"SHORT" "M/d/yy" "MEDIUM" "MMM d, yyyy" "LONG" "MMMM d, yyyy" "FULL" "EEEE, MMMM d, yyyy"}
-   :time {"SHORT" "h:mm a" "MEDIUM" "h:mm:ss a" "LONG" "h:mm:ss a" "FULL" "h:mm:ss a"}
-   :datetime {"SHORT" "M/d/yy, h:mm a" "MEDIUM" "MMM d, yyyy, h:mm:ss a" "LONG" "MMMM d, yyyy, h:mm:ss a" "FULL" "EEEE, MMMM d, yyyy, h:mm:ss a"}})
+;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
+;; :date-names extension point and carries ROOT alone, because core has no locale
+;; data of its own. Hand it the bundled tables so an explicit locale renders in its
+;; own language there too, not only through this library's DateTimeFormatter.
+;;
+;; Guarded on the point existing, so a jolt older than it still loads this library
+;; and simply keeps ROOT names in SimpleDateFormat. The guard is deliberately
+;; narrow: it swallows the one "not declared" case and rethrows anything else, so a
+;; genuine error in a provider still surfaces.
+;; The same applies to the other two locale-sensitive surfaces core declares:
+;; :number-symbols (String/format's decimal and grouping separators) and
+;; :currency-data (NumberFormat/getCurrencyInstance). All three are fed from the
+;; bundled tables here, because core carries ROOT alone for each.
+;;
+;; A point core does not declare is skipped rather than failing the load, so this
+;; library keeps working against a jolt that has only some of them.
+(defn- register-point! [reg point entries]
+  (try
+    (doseq [[id data] entries :when (not= id "")]
+      (reg point id data))
+    true
+    (catch Exception e
+      (if (re-find #"no extension point" (or (ex-message e) ""))
+        false
+        (throw e)))))
+
+(defn- register-locale-points! []
+  (when-let [reg (resolve 'jolt.host/register-extension!)]
+    (register-point! reg :date-names
+      (for [[id spec] ld/locales]
+        [id {:months (:months spec) :months-short (:months-short spec)
+             :days (:days spec) :days-short (:days-short spec)}]))
+    (register-point! reg :number-symbols nd/number-symbols)
+    (register-point! reg :currency-data nd/currency)
+    true))
+
+;; register-point! already tolerates an undeclared point per point, so this only
+;; has to run once.
+(defonce ^:private locale-points-registered (boolean (register-locale-points!)))
+
+(def ^:private style-key {"SHORT" :short "MEDIUM" :medium "LONG" :long "FULL" :full})
 (statics! ["FormatStyle" "java.time.format.FormatStyle"]
   (into {} (map (fn [s] [s (impl/value :jolt.time/format-style {:style s})]) ["SHORT" "MEDIUM" "LONG" "FULL"])))
 (impl/register-type! :jolt.time/format-style
   {:eq (fn [a b] (= (impl/field a :style) (impl/field b :style))) :hash (fn [s] (hash (impl/field s :style)))
    :str (fn [s] (impl/field s :style)) :cmp nil :classes #{"java.time.format.FormatStyle" "FormatStyle"}})
 (defn- style-of [fs] (impl/field fs :style))
-(defn- style-fmt [kind fs] (formatter (get-in style-patterns [kind (style-of fs)] "yyyy-MM-dd HH:mm:ss") "en"))
+;; ofLocalized* defers pattern resolution: the pattern depends on the locale,
+;; which .withLocale supplies after construction, so the value carries
+;; [kind style] and fmt-pattern resolves it per locale at use time.
+(defn- style-fmt [kind fs]
+  (impl/value :jolt.time/dt-formatter {:style [kind (style-key (style-of fs))] :locale "en"}))
 
 (statics! ["DateTimeFormatter" "java.time.format.DateTimeFormatter"]
   {"ofPattern" (fn [p & r] (formatter (str p) (if (seq r) (locale-id (first r)) "en")))
@@ -184,7 +247,7 @@
    "RFC_1123_DATE_TIME" (formatter "EEE, dd MMM yyyy HH:mm:ss Z" "en")
    "ofLocalizedDate" (fn [fs] (style-fmt :date fs))
    "ofLocalizedTime" (fn [fs] (style-fmt :time fs))
-   "ofLocalizedDateTime" (fn [fs] (style-fmt :datetime fs))})
+   "ofLocalizedDateTime" (fn [fs] (style-fmt :date-time fs))})
 
 ;; --- DateTimeFormatterBuilder (minimal) --------------------------------------
 (defn- builder [] (impl/value :jolt.time/dtf-builder {:pattern (atom "")}))
