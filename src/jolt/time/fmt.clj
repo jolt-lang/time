@@ -134,9 +134,19 @@
                                           :style (impl/field self :style)
                                           :locale (locale-id l)}))
    "withZone" (fn [self _z] self)
-   "parse" (fn [self s] (let [f (parse-with-pattern (fmt-pattern self) (str s))]
-                          (l/local-dt (days-from-civil (:year f) (:month f) (:day f))
-                                      (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f)))))
+   ;; A pattern that can carry an offset parses to an OffsetDateTime, so the
+   ;; offset survives into whatever the caller builds from it — malli does
+   ;; (Instant/from (.parse fmt s)), and dropping the offset silently read
+   ;; "…T12:34:56+0200" as 12:34 UTC instead of 10:34. A pattern with no offset
+   ;; letter still parses to a LocalDateTime, which is what tick's parse-* expect.
+   "parse" (fn [self s]
+             (let [p (fmt-pattern self)
+                   f (parse-with-pattern p (str s))
+                   ed (days-from-civil (:year f) (:month f) (:day f))
+                   nod (u/hmsn->nano (:hour f) (:min f) (:sec f) (:nano f))]
+               (if (some #{\X \x \Z \z \V} p)
+                 (zd/odt ed nod (:off f))
+                 (l/local-dt ed nod))))
    "toString" fmt-pattern})
 
 ;; register .format on every temporal
@@ -249,9 +259,34 @@
    "ofLocalizedTime" (fn [fs] (style-fmt :time fs))
    "ofLocalizedDateTime" (fn [fs] (style-fmt :date-time fs))})
 
-;; --- DateTimeFormatterBuilder (minimal) --------------------------------------
-(defn- builder [] (impl/value :jolt.time/dtf-builder {:pattern (atom "")}))
+;; --- DateTimeFormatterBuilder ------------------------------------------------
+;; ChronoField is NOT registered here: jolt core already models it as a real enum
+;; value (jolt.time.enums), and re-registering the statics would shadow that with
+;; a weaker one. The builder only ever uses a field as a token anyway.
+;; The builder composes a PATTERN STRING, which is what this library's formatter
+;; and parse-with-pattern already speak — so each append* maps to the pattern
+;; letters meaning the same thing rather than building a separate printer/parser
+;; tree. optionalStart/End become the pattern language's own [ … ].
+(defn- builder [] (impl/value :jolt.time/dtf-builder
+                              {:pattern (atom "") :defaults (atom {})}))
 (defn- b-append! [b s] (swap! (impl/field b :pattern) str s) b)
+
+;; appendFraction(field, min, max, decimalPoint): a fractional second, spelled as
+;; one S per digit, optionally preceded by the decimal point. A minWidth of 0
+;; means the whole run may be absent — the [ … ] form. Callers usually wrap it in
+;; optionalStart/End themselves (malli does), and the nesting that produces is
+;; harmless, but a caller who does not still gets the optionality the JVM gives.
+(defn- b-fraction [b _field min-width max-width decimal-point]
+  (let [core (str (when decimal-point ".")
+                  (apply str (repeat (max 1 (long max-width)) \S)))]
+    (b-append! b (if (zero? (long min-width)) (str "[" core "]") core))))
+
+;; appendOffset(pattern, noOffsetText): every JVM offset pattern ("+HHMM",
+;; "+HH:MM:ss", "+HHMMss", …) is the same run of sign/digits/colons to this
+;; parser, and the no-offset text is the literal Z that run already accepts, so
+;; they all map to the generic offset letter X.
+(defn- b-offset [b _pattern _no-offset-text] (b-append! b "X"))
+
 (__register-class-ctor! "DateTimeFormatterBuilder" (fn [& _] (builder)))
 (__register-class-ctor! "java.time.format.DateTimeFormatterBuilder" (fn [& _] (builder)))
 (impl/register-type! :jolt.time/dtf-builder
@@ -260,32 +295,85 @@
 (__register-class-methods! :jolt.time/dtf-builder
   {"appendPattern" (fn [b p] (b-append! b (str p)))
    "appendLiteral" (fn [b s] (b-append! b (str "'" s "'")))
-   "parseCaseInsensitive" (fn [b] b) "parseLenient" (fn [b] b)
-   "optionalStart" (fn [b] b) "optionalEnd" (fn [b] b)
-   "toFormatter" (fn [b & _] (formatter @(impl/field b :pattern) "en"))})
+   "appendFraction" (fn [b field min-width max-width decimal-point]
+                      (b-fraction b field min-width max-width decimal-point))
+   "appendOffset" (fn [b p no-offset] (b-offset b p no-offset))
+   "appendOffsetId" (fn [b] (b-append! b "X"))
+   "appendZoneId" (fn [b] (b-append! b "V"))
+   ;; parseDefaulting records the field's fallback. parse-with-pattern already
+   ;; starts every field at the JVM's own default (hour 0, offset 0, month and
+   ;; day 1), so the map is there to be inspected rather than consulted — what
+   ;; the fluent chain needs is that the call returns the builder.
+   "parseDefaulting" (fn [b field value]
+                       (swap! (impl/field b :defaults) assoc field value) b)
+   "parseCaseInsensitive" (fn [b] b) "parseCaseSensitive" (fn [b] b)
+   "parseLenient" (fn [b] b) "parseStrict" (fn [b] b)
+   "optionalStart" (fn [b] (b-append! b "[")) "optionalEnd" (fn [b] (b-append! b "]"))
+   "toFormatter" (fn [b & r]
+                   (formatter @(impl/field b :pattern)
+                              (if (seq r) (locale-id (first r)) "en")))})
 
 ;; --- pattern-based parse -----------------------------------------------------
 ;; Walk the pattern and input together: pattern letters consume digits into fields;
 ;; literals (quoted or plain) must match. Returns {:year :month :day :hour :min
 ;; :sec :nano :off}. Good enough for tick's parse-* with a custom formatter.
-(defn parse-with-pattern [pattern s]
-  (let [n (count pattern) sl (count s)]
-    (letfn [(run-len [i c] (loop [j i] (if (and (< j n) (= (nth pattern j) c)) (recur (inc j)) (- j i))))
+;; [ … ] is an OPTIONAL SECTION, as in the JVM's pattern language — it is what
+;; DateTimeFormatterBuilder's optionalStart/optionalEnd compose to. A section is
+;; attempted against the input and, if it does not fit, skipped whole. Sections
+;; nest, because appendFraction with a zero minimum brackets itself and callers
+;; commonly wrap it again.
+;;
+;; `strict?` is what makes that decision possible: inside a section a literal that
+;; does not match, or a numeric field with no digits, ABANDONS the section (nil)
+;; rather than being stepped over. At the top level it stays false, so every
+;; pattern that parsed before parses identically.
+(defn- pw-bracket-end
+  "Index just past the ] matching the [ at i, or `end` if unterminated."
+  [pattern i end]
+  (loop [j (inc i) depth 1]
+    (cond (>= j end) end
+          (= \[ (nth pattern j)) (recur (inc j) (inc depth))
+          (= \] (nth pattern j)) (if (= depth 1) (inc j) (recur (inc j) (dec depth)))
+          :else (recur (inc j) depth))))
+
+(defn- pw-run
+  "Walk pattern[i..end) against s from si, accumulating into f.
+  -> [f si'] , or nil when strict? and the pattern does not fit the input."
+  [pattern s end i0 si0 f0 strict?]
+  (let [sl (count s)]
+    (letfn [(run-len [i c] (loop [j i] (if (and (< j end) (= (nth pattern j) c)) (recur (inc j)) (- j i))))
             (digits [si k] (loop [j si acc 0 got 0]
                              (if (and (< j sl) (>= (int (nth s j)) 48) (<= (int (nth s j)) 57) (< got k))
                                (recur (inc j) (+ (* acc 10) (- (int (nth s j)) 48)) (inc got))
                                [acc j])))]
-      (loop [i 0 si 0 f {:year 0 :month 1 :day 1 :hour 0 :min 0 :sec 0 :nano 0 :off 0}]
-        (if (>= i n) f
+      (loop [i i0 si si0 f f0]
+        (if (>= i end) [f si]
           (let [c (nth pattern i) k (run-len i c)]
             (cond
-              (= c \') (let [[j o] (scan-quote pattern i n "")]  ; the literal to match
-                         (recur j (+ si (count o)) f))
-              (= c \y) (let [[v si'] (digits si (max k 4))] (recur (+ i k) si' (assoc f :year (if (<= k 2) (+ 2000 v) v))))
-              (= c \M) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :month v)))
-              (= c \d) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :day v)))
-              (= c \H) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :hour v)))
-              (= c \m) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :min v)))
+              ;; an optional section: parse it strictly, keep it only if it fit
+              (= c \[)
+              (let [after (pw-bracket-end pattern i end)
+                    inner (when (< si sl) (pw-run pattern s (dec after) (inc i) si f true))]
+                (if inner (recur after (second inner) (first inner))
+                          (recur after si f)))
+              (= c \]) (recur (inc i) si f)   ; unbalanced; step over it
+              (= c \') (let [[j o] (scan-quote pattern i end "")   ; the literal to match
+                             len (count o)]
+                         (if (and strict?
+                                  (or (> (+ si len) sl) (not= o (subs s si (+ si len)))))
+                           nil
+                           (recur j (+ si len) f)))
+              (= c \y) (let [[v si'] (digits si (max k 4))]
+                         (if (and strict? (= si' si)) nil
+                           (recur (+ i k) si' (assoc f :year (if (<= k 2) (+ 2000 v) v)))))
+              (= c \M) (let [[v si'] (digits si 2)]
+                         (if (and strict? (= si' si)) nil (recur (+ i k) si' (assoc f :month v))))
+              (= c \d) (let [[v si'] (digits si 2)]
+                         (if (and strict? (= si' si)) nil (recur (+ i k) si' (assoc f :day v))))
+              (= c \H) (let [[v si'] (digits si 2)]
+                         (if (and strict? (= si' si)) nil (recur (+ i k) si' (assoc f :hour v))))
+              (= c \m) (let [[v si'] (digits si 2)]
+                         (if (and strict? (= si' si)) nil (recur (+ i k) si' (assoc f :min v))))
               (= c \s) (let [[v si'] (digits si 2)
                              ;; ISO patterns (…ss XXX) don't spell out the fraction; consume an
                              ;; optional ".fffffffff" so 10:59:13.417Z keeps its millis.
@@ -293,14 +381,26 @@
                                           (let [[fv fend] (digits (inc si') 9)]
                                             [(* fv (u/pow10 (max 0 (- 9 (dec (- fend si')))))) fend])
                                           [(:nano f) si'])]
-                         (recur (+ i k) si2 (assoc f :sec v :nano nano)))
-              (= c \S) (let [[v si'] (digits si k)] (recur (+ i k) si' (assoc f :nano (* v (u/pow10 (max 0 (- 9 k)))))))
+                         (if (and strict? (= si' si)) nil
+                           (recur (+ i k) si2 (assoc f :sec v :nano nano))))
+              (= c \S) (let [[v si'] (digits si k)]
+                         (if (and strict? (= si' si)) nil
+                           (recur (+ i k) si' (assoc f :nano (* v (u/pow10 (max 0 (- 9 (- si' si)))))))))
               (or (= c \V) (= c \X) (= c \Z) (= c \z))
                 (if (and (< si sl) (#{\Z \z} (nth s si)))
                   (recur (+ i k) (inc si) (assoc f :off 0))
-                  (let [end (loop [j si] (if (and (< j sl) (or (#{\+ \- \:} (nth s j)) (and (>= (int (nth s j)) 48) (<= (int (nth s j)) 57)))) (recur (inc j)) j))]
-                    (recur (+ i k) end (assoc f :off (if (> end si) (z/parse-zone-offset (subs s si end)) 0)))))
-              :else (recur (inc i) (inc si) f))))))))
+                  (let [e (loop [j si] (if (and (< j sl) (or (#{\+ \- \:} (nth s j)) (and (>= (int (nth s j)) 48) (<= (int (nth s j)) 57)))) (recur (inc j)) j))]
+                    (if (and strict? (= e si)) nil
+                      (recur (+ i k) e (assoc f :off (if (> e si) (z/parse-zone-offset (subs s si e)) 0))))))
+              ;; a plain literal character
+              :else (if (and strict? (or (>= si sl) (not= c (nth s si))))
+                      nil
+                      (recur (inc i) (inc si) f)))))))))
+
+(defn parse-with-pattern [pattern s]
+  (first (pw-run pattern s (count pattern) 0 0
+                 {:year 0 :month 1 :day 1 :hour 0 :min 0 :sec 0 :nano 0 :off 0}
+                 false)))
 
 (defn- fmt-of [f] (if (and (impl/jt? f) (fmt? f)) (fmt-pattern f) (str f)))
 (defn- pfields [fmt s] (parse-with-pattern (fmt-of fmt) (str s)))

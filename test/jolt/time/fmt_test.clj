@@ -65,3 +65,55 @@
 
 (deftest via-temporal-method
   (is (= "2020-03-05" (.format (LocalDate/of 2020 3 5) (DateTimeFormatter/ofPattern "yyyy-MM-dd")))))
+
+;; --- DateTimeFormatterBuilder -------------------------------------------------
+;; Values certified against reference java.time (JDK 20). The builder composes a
+;; pattern string, so what these pin is that each append* contributes the piece
+;; that means the same thing, and that optional sections are attempted and then
+;; skipped rather than mis-aligning the parse.
+
+(deftest builder-composes-and-formats
+  (is (= "2020-03-05 ok"
+         (.format (-> (java.time.format.DateTimeFormatterBuilder.)
+                      (.appendPattern "yyyy-MM-dd")
+                      (.appendLiteral " ok")
+                      (.toFormatter))
+                  (LocalDate/of 2020 3 5)))))
+
+(defn- ^:private malli-style-formatter
+  "The shape malli.transform builds for its :string inst decoder."
+  []
+  (-> (java.time.format.DateTimeFormatterBuilder.)
+      (.appendPattern "yyyy-MM-dd['T'HH:mm:ss]")
+      (.optionalStart)
+      (.appendFraction java.time.temporal.ChronoField/MICRO_OF_SECOND 0 9 true)
+      (.optionalEnd)
+      (.optionalStart)
+      (.appendOffset "+HHMMss" "Z")
+      (.optionalEnd)
+      (.parseDefaulting java.time.temporal.ChronoField/HOUR_OF_DAY 0)
+      (.parseDefaulting java.time.temporal.ChronoField/OFFSET_SECONDS 0)
+      (.toFormatter)))
+
+(deftest builder-optional-sections-parse
+  (let [f (malli-style-formatter)
+        inst-of (fn [s] (str (java.time.Instant/from (.parse f s))))]
+    ;; every optional section present
+    (is (= "2020-03-05T13:45:30Z" (inst-of "2020-03-05T13:45:30Z")))
+    ;; the fraction section applies
+    (is (= "2020-03-05T13:45:30.123456Z" (inst-of "2020-03-05T13:45:30.123456Z")))
+    ;; the offset is APPLIED, not dropped: +0200 is two hours earlier in UTC
+    (is (= "2020-03-05T11:45:30Z" (inst-of "2020-03-05T13:45:30+0200")))
+    ;; date alone — every optional section is skipped, and the walk stays aligned
+    (is (= "2020-03-05T00:00:00Z" (inst-of "2020-03-05")))))
+
+(deftest builder-fraction-scales-by-digits-present
+  ;; a 9-wide fraction field given 3 digits is milliseconds, not nanoseconds
+  (let [f (-> (java.time.format.DateTimeFormatterBuilder.)
+              (.appendPattern "yyyy-MM-dd'T'HH:mm:ss")
+              (.optionalStart)
+              (.appendFraction java.time.temporal.ChronoField/NANO_OF_SECOND 0 9 true)
+              (.optionalEnd)
+              (.toFormatter))]
+    (is (= "2020-03-05T13:45:30.417"
+           (str (.parse f "2020-03-05T13:45:30.417"))))))
