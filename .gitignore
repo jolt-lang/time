@@ -1,3 +1,6 @@
 /.jolt/
 *.build/
 target/
+.clj-kondo/
+.cpcache/
+.lsp/
