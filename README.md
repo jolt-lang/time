@@ -23,6 +23,18 @@ tick API.
 (t/>> (t/date "2020-01-01") (t/new-period 3 :months))
 ```
 
+## Native libraries and time zones
+
+This library declares no shared libraries of its own — there is no
+`:jolt/native` entry in `deps.edn`, and nothing extra to install. It runs on
+jolt's built-in host primitives.
+
+Named IANA zones (`America/New_York`, `Europe/Paris`, …) have their offset
+resolved by the core `jolt.host/tz-offset-seconds` primitive, which the jolt
+host implements over libc. If that primitive is unavailable, those zones fall
+back to a built-in DST rule table covering the US, EU, AU, and NZ families.
+Fixed offsets (`Z`, `+05:30`) resolve purely in Clojure and never touch libc.
+
 ## Test
 
 ```
