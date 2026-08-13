@@ -65,3 +65,33 @@
 
 (deftest via-temporal-method
   (is (= "2020-03-05" (.format (LocalDate/of 2020 3 5) (DateTimeFormatter/ofPattern "yyyy-MM-dd")))))
+
+(deftest builder-append-fraction
+  ;; appendFraction maps onto the pattern model as '.' + maxWidth 'S' characters,
+  ;; so output is fixed-width (the JVM trims trailing zeros toward minWidth; the
+  ;; values here have none, so both agree).
+  (let [bb (fn [] (doto (java.time.format.DateTimeFormatterBuilder.)
+                    (.appendPattern "HH:mm:ss")))
+        t (java.time.LocalTime/of 12 34 56 123456789)
+        nano java.time.temporal.ChronoField/NANO_OF_SECOND]
+    (is (= "12:34:56.123456789"
+           (.format (.toFormatter (.appendFraction (bb) nano 0 9 true)) t)))
+    (is (= "12:34:56.123"
+           (.format (.toFormatter (.appendFraction (bb) nano 0 3 true)) t)))
+    (is (= "12:34:56123"
+           (.format (.toFormatter (.appendFraction (bb) nano 0 3 false)) t)))
+    (is (= "12:34:56.123"
+           (.format (.toFormatter (.appendFraction (bb) java.time.temporal.ChronoField/MILLI_OF_SECOND 0 3 true)) t)))))
+
+(deftest builder-append-fraction-round-trip
+  (let [f (.toFormatter (doto (java.time.format.DateTimeFormatterBuilder.)
+                          (.appendPattern "HH:mm:ss")
+                          (.appendFraction java.time.temporal.ChronoField/NANO_OF_SECOND 0 9 true)))
+        s (.format f (java.time.LocalTime/of 12 34 56 123456789))]
+    (is (= "12:34:56.123456789" s))
+    (is (= s (.format f (.parse f s))))))
+
+(deftest builder-append-fraction-unsupported-field
+  (is (thrown? Exception
+        (.appendFraction (java.time.format.DateTimeFormatterBuilder.)
+                         java.time.temporal.ChronoField/YEAR 0 3 true))))
