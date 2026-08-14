@@ -95,3 +95,34 @@
   (is (thrown? Exception
         (.appendFraction (java.time.format.DateTimeFormatterBuilder.)
                          java.time.temporal.ChronoField/YEAR 0 3 true))))
+
+(deftest builder-append-fraction-micro
+  ;; malli.experimental.time's formatters append MICRO_OF_SECOND
+  (let [t (java.time.LocalTime/of 12 34 56 123456789)
+        f (.toFormatter (doto (java.time.format.DateTimeFormatterBuilder.)
+                          (.appendPattern "HH:mm:ss")
+                          (.appendFraction java.time.temporal.ChronoField/MICRO_OF_SECOND 0 6 true)))]
+    (is (= "12:34:56.123456" (.format f t)))))
+
+(deftest builder-append-offset-and-defaults
+  ;; the malli.transform string->date builder shape: optional fraction,
+  ;; optional offsets, parse defaults
+  (let [f (.toFormatter (doto (java.time.format.DateTimeFormatterBuilder.)
+                          (.appendPattern "yyyy-MM-dd['T'HH:mm:ss]")
+                          (.optionalStart)
+                          (.appendFraction java.time.temporal.ChronoField/MICRO_OF_SECOND 0 9 true)
+                          (.optionalEnd)
+                          (.optionalStart)
+                          (.appendOffset "+HHMMss" "Z")
+                          (.optionalEnd)
+                          (.parseDefaulting java.time.temporal.ChronoField/HOUR_OF_DAY 0)
+                          (.parseDefaulting java.time.temporal.ChronoField/OFFSET_SECONDS 0)))]
+    (is (= "2020-03-05T13:45:30" (str (.parse f "2020-03-05T13:45:30Z"))))
+    (is (= "2020-03-05T00:00" (str (.parse f "2020-03-05"))))
+    (is (= "2020-03-05T13:45:30.123456" (str (.parse f "2020-03-05T13:45:30.123456")))))
+  (let [f (.toFormatter (doto (java.time.format.DateTimeFormatterBuilder.)
+                          (.appendPattern "HH:mm:ss")
+                          (.appendOffset "+HH:MM:ss" "Z")))]
+    (is (= "12:34:56+01:00"
+           (.format f (java.time.OffsetDateTime/of 2020 1 1 12 34 56 0
+                                                   (java.time.ZoneOffset/ofHours 1)))))))
