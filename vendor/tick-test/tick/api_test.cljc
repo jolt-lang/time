@@ -164,7 +164,11 @@
     (is (= d (t/format :iso-local-date (t/date d))))
     (is (= d (t/format (t/formatter :iso-local-date) (t/date d))))
     (is (= d (t/format (t/formatter "YYYY-MM-dd") (t/date d))))
-    #?(:bb
+    #?(:jolt
+       ; jolt matches :bb but renders real locales through this library
+       (is (= "3030-mai-03" (t/format (t/formatter "YYYY-MMM-dd" java.util.Locale/FRENCH)
+                              (t/date d))))
+       :bb
        ; bb only inlcludes the English Locale by default
        (is (= "3030-May-03" (t/format (t/formatter "YYYY-MMM-dd" java.util.Locale/FRENCH)
                               (t/date d))))
