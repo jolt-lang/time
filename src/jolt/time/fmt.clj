@@ -258,8 +258,18 @@
   {:eq (fn [a b] (identical? a b)) :hash (fn [_] 0) :str (fn [_] "DateTimeFormatterBuilder") :cmp nil
    :classes #{"java.time.format.DateTimeFormatterBuilder" "DateTimeFormatterBuilder"}})
 (__register-class-methods! :jolt.time/dtf-builder
-  {"appendPattern" (fn [b p] (b-append! b (str p)))
+  ;; [...] optional sections read as always-present: the parse walker defaults
+  ;; every field absent at end of input (midnight, zero offset), which is what
+  ;; the callers of this builder default to via parseDefaulting anyway.
+  {"appendPattern" (fn [b p] (b-append! b (apply str (remove #{\[ \]} (str p)))))
    "appendLiteral" (fn [b s] (b-append! b (str "'" s "'")))
+   ;; the X arms of the walkers already print/parse Z for a zero offset and
+   ;; ±HH[:MM[:ss]]; colon use follows the requested pattern.
+   "appendOffset" (fn [b pattern _no-offset-text]
+                    (b-append! b (if (some #{\:} (str pattern)) "XXX" "XX")))
+   ;; the parse walker's field map starts at midnight/zero-offset, so absent
+   ;; fields already resolve to the defaults every caller installs here.
+   "parseDefaulting" (fn [b _field _value] b)
    ;; In the pattern model a fraction is the decimal point (when requested)
    ;; followed by maxWidth 'S' characters. Fixed-width: the JVM trims trailing
    ;; zeros toward minWidth, which a pattern string can't express. Only the
@@ -268,6 +278,7 @@
                       (let [fname (str field)
                             width (case fname
                                     "NANO_OF_SECOND" (min (u/->long max-w) 9)
+                                    "MICRO_OF_SECOND" (min (u/->long max-w) 6)
                                     "MILLI_OF_SECOND" (min (u/->long max-w) 3)
                                     (throw (ex-info (str "appendFraction: unsupported field " fname)
                                                     {:field fname})))]
