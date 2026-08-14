@@ -260,6 +260,18 @@
 (__register-class-methods! :jolt.time/dtf-builder
   {"appendPattern" (fn [b p] (b-append! b (str p)))
    "appendLiteral" (fn [b s] (b-append! b (str "'" s "'")))
+   ;; In the pattern model a fraction is the decimal point (when requested)
+   ;; followed by maxWidth 'S' characters. Fixed-width: the JVM trims trailing
+   ;; zeros toward minWidth, which a pattern string can't express. Only the
+   ;; second-fraction fields map onto 'S'.
+   "appendFraction" (fn [b field _min-w max-w point]
+                      (let [fname (str field)
+                            width (case fname
+                                    "NANO_OF_SECOND" (min (u/->long max-w) 9)
+                                    "MILLI_OF_SECOND" (min (u/->long max-w) 3)
+                                    (throw (ex-info (str "appendFraction: unsupported field " fname)
+                                                    {:field fname})))]
+                        (b-append! b (str (when point ".") (apply str (repeat width "S"))))))
    "parseCaseInsensitive" (fn [b] b) "parseLenient" (fn [b] b)
    "optionalStart" (fn [b] b) "optionalEnd" (fn [b] b)
    "toFormatter" (fn [b & _] (formatter @(impl/field b :pattern) "en"))})
@@ -274,7 +286,14 @@
             (digits [si k] (loop [j si acc 0 got 0]
                              (if (and (< j sl) (>= (int (nth s j)) 48) (<= (int (nth s j)) 57) (< got k))
                                (recur (inc j) (+ (* acc 10) (- (int (nth s j)) 48)) (inc got))
-                               [acc j])))]
+                               [acc j])))
+            ;; does the rest of the pattern spell the fraction out with 'S'
+            ;; (outside quoted literals)? Then the seconds arm must not consume it.
+            (s-ahead? [i] (loop [j i]
+                            (cond (>= j n) false
+                                  (= (nth pattern j) \') (let [[j2 _] (scan-quote pattern j n "")] (recur j2))
+                                  (= (nth pattern j) \S) true
+                                  :else (recur (inc j)))))]
       (loop [i 0 si 0 f {:year 0 :month 1 :day 1 :hour 0 :min 0 :sec 0 :nano 0 :off 0}]
         (if (>= i n) f
           (let [c (nth pattern i) k (run-len i c)]
@@ -288,8 +307,10 @@
               (= c \m) (let [[v si'] (digits si 2)] (recur (+ i k) si' (assoc f :min v)))
               (= c \s) (let [[v si'] (digits si 2)
                              ;; ISO patterns (…ss XXX) don't spell out the fraction; consume an
-                             ;; optional ".fffffffff" so 10:59:13.417Z keeps its millis.
-                             [nano si2] (if (and (< si' sl) (= \. (nth s si')))
+                             ;; optional ".fffffffff" so 10:59:13.417Z keeps its millis — but only
+                             ;; when the pattern doesn't carry its own 'S' run for it.
+                             [nano si2] (if (and (< si' sl) (= \. (nth s si'))
+                                             (not (s-ahead? (+ i k))))
                                           (let [[fv fend] (digits (inc si') 9)]
                                             [(* fv (u/pow10 (max 0 (- 9 (dec (- fend si')))))) fend])
                                           [(:nano f) si'])]
