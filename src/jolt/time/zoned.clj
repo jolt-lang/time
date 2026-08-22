@@ -203,18 +203,92 @@
                             (and (impl/jt? off) (z/zid? off)) (z/zid-off off) :else (z/parse-zone-offset off)))
 (impl/register-type! :jolt.time/offset-time
   {:eq (fn [a b] (and (= (ot-nod a) (ot-nod b)) (= (ot-off a) (ot-off b)))) :hash (fn [x] (ot-nod x))
-   :str (fn [x] (str (u/iso-time-str (ot-nod x)) (offset-suffix (ot-off x)))) :cmp (fn [a b] (compare (- (ot-nod a) (* (ot-off a) nps)) (- (ot-nod b) (* (ot-off b) nps))))
+   :str (fn [x] (str (u/iso-time-str (ot-nod x)) (offset-suffix (ot-off x))))
+   ;; OffsetTime.compareTo: the UTC-equivalent instant first, local time as the
+   ;; tie-break.
+   :cmp (fn [a b] (let [c (compare (- (ot-nod a) (* (ot-off a) nps)) (- (ot-nod b) (* (ot-off b) nps)))]
+                    (if (zero? c) (compare (ot-nod a) (ot-nod b)) c)))
    :classes #{"java.time.OffsetTime" "OffsetTime" "java.time.temporal.Temporal" "Temporal" "java.lang.Comparable" "Comparable"}})
 (__register-class-methods! :jolt.time/offset-time
   {"getHour" (fn [x] (l/lt-hour (ot-nod x))) "getMinute" (fn [x] (l/lt-minute (ot-nod x)))
    "getSecond" (fn [x] (l/lt-second (ot-nod x))) "getNano" (fn [x] (l/lt-nano (ot-nod x)))
    "getOffset" (fn [x] (z/zone-offset (ot-off x))) "toLocalTime" (fn [x] (l/local-time (ot-nod x)))
+   "compareTo" (fn [x o] (let [c (compare (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps)))]
+                           (if (zero? c) (compare (ot-nod x) (ot-nod o)) c)))
+   "isBefore" (fn [x o] (< (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps))))
+   "isAfter" (fn [x o] (> (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps))))
+   "equals" (fn [x o] (boolean (and (impl/jt? o) (= :jolt.time/offset-time (impl/type-of o))
+                                    (= (ot-nod x) (ot-nod o)) (= (ot-off x) (ot-off o)))))
+   "hashCode" (fn [x] (ot-nod x))
    "toString" (fn [x] (str (u/iso-time-str (ot-nod x)) (offset-suffix (ot-off x))))})
+;; ISO parse: "HH:mm[:ss[.fff]]±offset" — the offset is REQUIRED, as on the JVM
+;; (ISO_OFFSET_TIME); its absence throws DateTimeParseException.
+(defn parse-offset-time-iso [s]
+  (let [s (str s)
+        op (some (fn [i] (when (#{\Z \z \+ \-} (nth s i)) i)) (range (count s)))]
+    (when-not op
+      (throw (jolt.host/throwable "java.time.format.DateTimeParseException"
+                                  (str "Text '" s "' could not be parsed: no zone offset"))))
+    (ot (u/parse-hms->nano (subs s 0 op)) (z/parse-zone-offset (subs s op)))))
 (statics! ["OffsetTime" "java.time.OffsetTime"]
   {"of" (fn ([tm off] (ot (l/lt-nano-of-day tm) (zo-secs* off)))
             ([h m s nano off] (ot (u/hmsn->nano (u/->long h) (u/->long m) (u/->long s) (u/->long nano)) (zo-secs* off))))
+   "parse" (fn [s & _] (parse-offset-time-iso s))
    "MIN" (ot 0 (* 18 3600))
    "MAX" (ot (dec npd) (* -18 3600))})
+
+;; --- X/from: the TemporalAccessor query --------------------------------------
+;; Re-register the core from statics with the zoned/offset types added, and
+;; supply the zoned-type ones — the same layering the formatter-aware parse
+;; uses (the last registration of a member wins).
+(defn- from-dte! [what x]
+  (throw (jolt.host/throwable "java.time.DateTimeException"
+                              (str "Unable to obtain " what " from TemporalAccessor: " (pr-str x)))))
+(defn- t-kind [x] (when (impl/jt? x) (impl/type-of x)))
+(defn- ednod-of [x]          ; [epoch-day nano-of-day] when the date+time are there
+  (condp = (t-kind x)
+    :jolt.time/local-date-time [(l/ldt-epoch-day x) (l/ldt-nod x)]
+    :jolt.time/offset-date-time [(odt-ed x) (odt-nod x)]
+    :jolt.time/zoned-date-time [(zdt-ed x) (zdt-nod x)]
+    nil))
+(statics! ["LocalDate" "java.time.LocalDate"]
+  {"from" (fn [x] (cond (= :jolt.time/local-date (t-kind x)) x
+                        (ednod-of x) (l/local-date (first (ednod-of x)))
+                        :else (from-dte! "LocalDate" x)))})
+(statics! ["LocalTime" "java.time.LocalTime"]
+  {"from" (fn [x] (cond (= :jolt.time/local-time (t-kind x)) x
+                        (= :jolt.time/offset-time (t-kind x)) (l/local-time (ot-nod x))
+                        (ednod-of x) (l/local-time (second (ednod-of x)))
+                        :else (from-dte! "LocalTime" x)))})
+(statics! ["LocalDateTime" "java.time.LocalDateTime"]
+  {"from" (fn [x] (cond (= :jolt.time/local-date-time (t-kind x)) x
+                        (ednod-of x) (let [[ed nod] (ednod-of x)] (l/local-dt ed nod))
+                        :else (from-dte! "LocalDateTime" x)))})
+(statics! ["OffsetDateTime" "java.time.OffsetDateTime"]
+  {"from" (fn [x] (condp = (t-kind x)
+                    :jolt.time/offset-date-time x
+                    :jolt.time/zoned-date-time (odt (zdt-ed x) (zdt-nod x) (zdt-off x))
+                    (from-dte! "OffsetDateTime" x)))})
+(statics! ["OffsetTime" "java.time.OffsetTime"]
+  {"from" (fn [x] (condp = (t-kind x)
+                    :jolt.time/offset-time x
+                    :jolt.time/offset-date-time (ot (odt-nod x) (odt-off x))
+                    :jolt.time/zoned-date-time (ot (zdt-nod x) (zdt-off x))
+                    (from-dte! "OffsetTime" x)))})
+(statics! ["ZonedDateTime" "java.time.ZonedDateTime"]
+  {"from" (fn [x] (condp = (t-kind x)
+                    :jolt.time/zoned-date-time x
+                    :jolt.time/offset-date-time (zdt (odt-ed x) (odt-nod x) (odt-off x)
+                                                     (z/zone-id (z/zo-id (odt-off x)) (odt-off x)))
+                    (from-dte! "ZonedDateTime" x)))})
+(statics! ["Instant" "java.time.Instant"]
+  {"from" (fn [x] (condp = (t-kind x)
+                    :jolt.time/instant x
+                    :jolt.time/offset-date-time (inst/instant (odt->nanos x))
+                    :jolt.time/zoned-date-time (inst/instant (zdt->nanos x))
+                    ;; anything else keeps the core arm's permissive behavior
+                    ;; (an ldt reads as UTC), which tick relies on.
+                    (inst/instant (a/temporal-nanos x))))})
 
 ;; --- Clock -------------------------------------------------------------------
 (defn- clock [kind ms zone base] (impl/value :jolt.time/clock {:kind kind :ms ms :zone zone :base base}))

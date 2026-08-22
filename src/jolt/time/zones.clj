@@ -7,7 +7,8 @@
             [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
             [jolt.time.util :as u]
             [jolt.time.instant :as inst]
-            [jolt.time.local :as l]))
+            [jolt.time.local :as l]
+            [jolt.time.zone-ids :as zone-ids]))
 
 (defn- statics! [names members] (doseq [n names] (__register-class-statics! n members)))
 (def ^:private nps u/nanos-per-sec)
@@ -53,8 +54,26 @@
    "equals" (fn [z o] (boolean (and (impl/jt? o) (zo? o) (= (zo-secs z) (zo-secs o)))))
    "hashCode" zo-secs "toString" (fn [z] (zo-id (zo-secs z)))})
 
+;; ZoneOffset/of accepts only the JVM's offset ID forms — Z, +h, +hh, +hh:mm,
+;; +hhmm, +hh:mm:ss, +hhmmss (and -) within ±18:00 — and throws DateTimeException
+;; otherwise. parse-zone-offset stays lenient for internal callers; only the
+;; static is strict ("UTC" reaching it used to answer 0 and malli's
+;; (not (validate :time/zone-offset "UTC")) failed).
+(defn- zone-offset-of-strict [s0]
+  (let [s (str s0)
+        bad! (fn [] (throw (jolt.host/throwable
+                            "java.time.DateTimeException"
+                            (str "Invalid ID for ZoneOffset, invalid format: " s))))]
+    (cond
+      (= s "Z") (zone-offset 0)
+      (and (pos? (count s)) (#{\+ \-} (nth s 0))
+           (re-matches #"[+-](\d|\d{2}|\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|\d{4}|\d{6})" s))
+      (let [secs (parse-zone-offset s)]
+        (if (<= (abs secs) (* 18 3600)) (zone-offset secs) (bad!)))
+      :else (bad!))))
+
 (statics! ["ZoneOffset" "java.time.ZoneOffset"]
-  {"of" (fn [s] (zone-offset (parse-zone-offset s)))
+  {"of" zone-offset-of-strict
    "ofTotalSeconds" (fn [n] (zone-offset (u/->long n)))
    "ofHours" (fn [h] (zone-offset (* (u/->long h) 3600)))
    "ofHoursMinutes" (fn [h m] (zone-offset (+ (* (u/->long h) 3600) (* (u/->long m) 60))))
@@ -169,10 +188,35 @@
    "equals" (fn [z o] (boolean (and (impl/jt? o) (zid? o) (= (zid-id z) (zid-id o)))))
    "hashCode" (fn [z] (hash (zid-id z))) "toString" zid-id})
 
+;; ZoneId/of validates the ID shape like the JVM — one-char ids other than Z,
+;; an invalid offset form, or a region with an illegal character (malli probes
+;; "UTC'") throw DateTimeException. A syntax-valid region is accepted without a
+;; tzdb existence check (offset resolution stays best-effort), which is the one
+;; deliberate divergence here.
+(def ^:private region-id-re #"[A-Za-z][A-Za-z0-9~/._+-]*")
+(defn- zone-id-of-strict [z]
+  (if (and (impl/jt? z) (or (zo? z) (zid? z)))
+    (zone-id-of z)
+    (let [id (str z)
+          bad! (fn [] (throw (jolt.host/throwable
+                              "java.time.DateTimeException"
+                              (str "Invalid ID for ZoneId, invalid format: " id))))]
+      (cond
+        (= id "Z") (zone-id-of id)
+        (= 1 (count id)) (bad!)
+        (#{\+ \-} (nth id 0)) (do (zone-offset-of-strict id) (zone-id-of id))
+        :else (if-let [[_ pfx suffix] (re-matches #"(UTC|GMT|UT)([+-].+)?" id)]
+                (do (when suffix (zone-offset-of-strict suffix))
+                    (zone-id-of id))
+                (if (re-matches region-id-re id)
+                  (zone-id-of id)
+                  (bad!)))))))
+
+(def ^:private available-zone-ids (delay (set zone-ids/ids)))
 (statics! ["ZoneId" "java.time.ZoneId"]
-  {"of" (fn [id & _] (zone-id-of id))
+  {"of" (fn [id & _] (zone-id-of-strict id))
    "systemDefault" (fn [] (zone-id "Z" 0))
-   "getAvailableZoneIds" (fn [] (set (keys short-ids)))
+   "getAvailableZoneIds" (fn [] @available-zone-ids)
    "SHORT_IDS" short-ids})
 
 ;; --- ZoneRules ---------------------------------------------------------------
