@@ -130,6 +130,34 @@
     "equals" (fn [x o] (boolean (and (impl/jt? o) (zdt? o) (= (zdt->nanos x) (zdt->nanos o)) (= (z/zid-id (zdt-zid x)) (z/zid-id (zdt-zid o))))))
     "hashCode" (fn [x] (hash (zdt->nanos x))) "toString" zdt->string}))
 
+;; --- what zone a `now` answers in ---------------------------------------------
+;; The java.time value types live in core, which has no zone layer, so core's
+;; `now` reads epoch millis and splits them into fields with no offset applied.
+;; That is right for core alone and wrong once this library is loaded: it made
+;; LocalDate/now answer the UTC date on every machine, and ignore a zone even
+;; when handed one — (LocalDate/now (ZoneId/of "Australia/Sydney")) came back a
+;; day behind. ZonedDateTime/now was the only member of the family that honoured
+;; a zone. These re-register the rest over core's, the way fmt.clj already
+;; re-registers the formatter-aware LocalDate/parse over core's ISO-only one.
+(defn- now-zone
+  "The zone a `now` answers in: a Clock's own zone, a zone designator passed
+  directly, or the machine's."
+  [arg]
+  (cond
+    (and (impl/jt? arg) (= :jolt.time/clock (impl/type-of arg))) (impl/field arg :zone)
+    (some? arg) arg
+    :else (z/system-zone-id)))
+
+(defn- now-local-nanos
+  "[local-nanos offset-seconds] for a Clock / zone designator / nil. clock-millis
+  honours a fixed, offset or tick Clock and falls back to the wall clock for
+  anything else, so a bare ZoneId argument reads the wall clock in that zone."
+  [arg]
+  (let [nanos (* (impl/clock-millis arg) 1000000)
+        [id off0] (z/resolve-zone (now-zone arg))
+        off (z/zone-offset-at-instant id off0 (u/floor-div nanos nps))]
+    [(+ nanos (* off nps)) off]))
+
 (statics! ["ZonedDateTime" "java.time.ZonedDateTime"]
   {"of" (fn ([ldt zone] (zoned-of-ldt ldt zone))
             ([d tm zone] (zoned-of-ldt (l/local-dt (l/ld-epoch-day d) (l/lt-nano-of-day tm)) zone))
@@ -137,8 +165,8 @@
                                                                  (u/hmsn->nano (u/->long h) (u/->long mi) (u/->long s) (u/->long nano))) zone)))
    "ofInstant" (fn ([i zone] (zoned-of-instant (inst/inst-nanos i) zone))
                    ([ldt _off zone] (zoned-of-ldt ldt zone)))
-   "now" (fn [& args] (let [clk (first args) zone (if (and (impl/jt? clk) (= :jolt.time/clock (impl/type-of clk))) (impl/field clk :zone) "Z")]
-                       (zoned-of-instant (* (impl/clock-millis clk) 1000000) zone)))
+   "now" (fn [& args] (let [clk (first args)]
+                       (zoned-of-instant (* (impl/clock-millis clk) 1000000) (now-zone clk))))
    "parse" (fn [s & _] (parse-zoned (str s)))})
 
 ;; --- OffsetDateTime ----------------------------------------------------------
@@ -184,7 +212,8 @@
   {"of" (fn ([ldt off] (offset-of-ldt ldt off))
             ([d tm off] (offset-of-ldt (l/local-dt (l/ld-epoch-day d) (l/lt-nano-of-day tm)) off))
             ([y mo d h mi s nano off] (offset-of-ldt (l/local-dt (days-from-civil (u/->long y) (u/->long mo) (u/->long d)) (u/hmsn->nano (u/->long h) (u/->long mi) (u/->long s) (u/->long nano))) off)))
-   "now" (fn [& args] (let [nanos (* (impl/clock-millis (first args)) 1000000)] (odt (u/floor-div nanos npd) (u/floor-mod nanos npd) 0)))
+   "now" (fn [& args] (let [[local off] (now-local-nanos (first args))]
+                        (odt (u/floor-div local npd) (u/floor-mod local npd) off)))
    "ofInstant" (fn [i zone] (let [nanos (inst/inst-nanos i) [id off0] (z/resolve-zone zone)
                                   off (z/zone-offset-at-instant id off0 (u/floor-div nanos nps)) local (+ nanos (* off nps))]
                               (odt (u/floor-div local npd) (u/floor-mod local npd) off)))
@@ -306,11 +335,22 @@
    "getZone" (fn [c] (impl/field c :zone)) "toString" (fn [_] "Clock")})
 (statics! ["Clock" "java.time.Clock"]
   {"systemUTC" (fn [] (clock :system 0 (z/zone-id "Z" 0) nil))
-   "systemDefaultZone" (fn [] (clock :system 0 (z/zone-id "Z" 0) nil))
+   "systemDefaultZone" (fn [] (clock :system 0 (z/zone-id-of (z/system-zone-id)) nil))
    "system" (fn [zone] (clock :system 0 (z/zone-id-of zone) nil))
    "fixed" (fn [i zone] (clock :fixed (u/floor-div (inst/inst-nanos i) 1000000) (z/zone-id-of zone) nil))
    "offset" (fn [clk dur] (clock :offset (u/floor-div (a/dur-total-nanos dur) 1000000) (impl/field clk :zone) clk))
    "tick" (fn [clk dur] (clock :tick (u/floor-div (a/dur-total-nanos dur) 1000000) (impl/field clk :zone) clk))})
+
+;; --- zone-aware `now` for the core value types --------------------------------
+(statics! ["LocalDate" "java.time.LocalDate"]
+  {"now" (fn [& args] (l/local-date (u/floor-div (first (now-local-nanos (first args))) npd)))})
+
+(statics! ["LocalTime" "java.time.LocalTime"]
+  {"now" (fn [& args] (l/local-time (u/floor-mod (first (now-local-nanos (first args))) npd)))})
+
+(statics! ["LocalDateTime" "java.time.LocalDateTime"]
+  {"now" (fn [& args] (let [[local _] (now-local-nanos (first args))]
+                        (l/local-dt (u/floor-div local npd) (u/floor-mod local npd))))})
 
 ;; --- the deferred atZone / atOffset ------------------------------------------
 (__register-class-methods! :jolt.time/local-date-time

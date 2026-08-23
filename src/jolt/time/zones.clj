@@ -213,9 +213,99 @@
                   (bad!)))))))
 
 (def ^:private available-zone-ids (delay (set zone-ids/ids)))
+
+;; --- the machine's own zone ---------------------------------------------------
+;; systemDefault used to answer "Z" unconditionally, which is less "UTC is the
+;; default" than "this never asked". There is no host primitive for "which zone
+;; is this machine in" — jolt.host/tz-offset-seconds answers a NAMED zone's
+;; offset, a different question — so this reads the places libc reads, in libc's
+;; order, and still answers "Z" when none of them says.
+;;
+;; Nothing here throws. A zone is looked up on ordinary paths like
+;; ZonedDateTime/now, and a container with no /etc/localtime is not worth an
+;; exception.
+(defn- quietly [f] (try (f) (catch Exception _ nil)))
+
+(def ^:private zoneinfo-marker "/zoneinfo/")
+
+(defn- zoneinfo-name
+  "The IANA name inside a tzdata path, or nil. Splits on the LAST /zoneinfo/
+  rather than a fixed prefix: macOS interposes a version directory, as in
+  /private/var/db/timezone/tz/2026c.1.0/zoneinfo/Australia/Sydney, and the name
+  itself may contain a slash (America/Argentina/Buenos_Aires)."
+  [path]
+  (when (string? path)
+    (when-let [i (str/last-index-of path zoneinfo-marker)]
+      (let [n (subs path (+ i (count zoneinfo-marker)))]
+        (when (seq n) n)))))
+
+(defn- as-zone-id
+  "`s` as a zone id this library can resolve to a real offset, or nil.
+
+  Answers the SHORT_IDS expansion rather than the abbreviation: EST maps to the
+  fixed -05:00, and resolve-zone reads a bare \"EST\" as a 0-offset stub, so
+  handing one back unexpanded would quietly place the machine on UTC.
+
+  Checked against the real id set rather than by shape. A POSIX rule string
+  (TZ=AEST-10AEDT,M10.1.0,M4.1.0/3) is legal in TZ and is not a zone id, and
+  testing for a slash would accept it — M4.1.0/3 has one."
+  [s]
+  (when (and (string? s) (seq s))
+    (let [id (get short-ids s s)]
+      (when (or (contains? #{"Z" "UTC" "GMT" "Etc/UTC" "Etc/GMT"} id)
+                (fixed-offset-zone? id)
+                (contains? @available-zone-ids id))
+        id))))
+
+(defn- tz-env-zone []
+  (let [raw (System/getenv "TZ")
+        ;; POSIX allows a leading ':' and ignores it. TZ=:Australia/Sydney and
+        ;; TZ=:/usr/share/zoneinfo/Australia/Sydney are both ordinary spellings.
+        tz (when (seq raw) (if (= \: (nth raw 0)) (subs raw 1) raw))]
+    (if (and (some? raw) (empty? raw))
+      ;; Set but empty is not unset: libc reads it as UTC rather than as "use the
+      ;; system zone", which is why the host probe restores an unset TZ with
+      ;; unsetenv rather than an empty string. Answering the machine's zone here
+      ;; would leave systemDefault disagreeing with localtime() in one process.
+      "Z"
+      (or (zoneinfo-name tz) (as-zone-id tz)))))
+
+(defn- localtime-link-zone []
+  ;; One readlink(2). /etc/localtime is a symlink into the tzdata tree on every
+  ;; mainstream Linux and on macOS.
+  (quietly #(zoneinfo-name (str (java.nio.file.Files/readSymbolicLink
+                                 (java.nio.file.Paths/get "/etc/localtime" (into-array String [])))))))
+
+(defn- localtime-canonical-zone []
+  ;; Costlier, and follows a chain of links that the single readlink above stops
+  ;; short of resolving.
+  (quietly #(zoneinfo-name (.getCanonicalPath (java.io.File. "/etc/localtime")))))
+
+(defn- etc-timezone-zone []
+  ;; Debian derivatives, where /etc/localtime may be a copy rather than a link.
+  (quietly #(let [f (java.io.File. "/etc/timezone")]
+              (when (.isFile f)
+                (as-zone-id (str/trim (slurp f)))))))
+
+(defn system-zone-id
+  "The IANA id of the machine's own zone, or \"Z\" when nothing says.
+
+  Not cached: it is asked on the way into a `now`, not in a loop, and caching it
+  would bake a build machine's zone into a dumped image. One getenv plus, at
+  most, one readlink."
+  []
+  (or (tz-env-zone)
+      (localtime-link-zone)
+      (localtime-canonical-zone)
+      (etc-timezone-zone)
+      "Z"))
+
 (statics! ["ZoneId" "java.time.ZoneId"]
   {"of" (fn [id & _] (zone-id-of-strict id))
-   "systemDefault" (fn [] (zone-id "Z" 0))
+   ;; zone-id-of, not the strict of: system-zone-id has already checked what it
+   ;; found against the id set, and a zone lookup on the way into a `now` is not
+   ;; a place to raise.
+   "systemDefault" (fn [] (zone-id-of (system-zone-id)))
    "getAvailableZoneIds" (fn [] @available-zone-ids)
    "SHORT_IDS" short-ids})
 
