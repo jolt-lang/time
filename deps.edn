@@ -6,6 +6,28 @@
 ;; equivalent slash-form; being on :paths it shadows the Maven one.
 {:paths ["src" "vendor/time-literals"]
 
+ ;; The java.time classes jolt.time installs that core does NOT carry (RFC 0008:
+ ;; core has the value types, this library has everything that formats or names a
+ ;; zone), plus java.util.Locale. Declaring them (RFC 0014) is what lets a project
+ ;; that depends on this library write ZoneId or DateTimeFormatter — or require
+ ;; tick.core, whose cljc.java-time namespaces resolve these as they load —
+ ;; without knowing the jolt.time install namespace.
+ ;;
+ ;; Fully-qualified only: jolt derives the simple spelling. The runtime used to
+ ;; carry both by hand, and DateTimeFormatterBuilder missing from the simple form
+ ;; is what kept malli's transform.cljc from loading while the qualified spelling
+ ;; worked.
+ :jolt/provides {jolt.time ["java.time.format.DateTimeFormatter"
+                            "java.time.format.DateTimeFormatterBuilder"
+                            "java.time.format.FormatStyle"
+                            "java.time.ZoneOffset"
+                            "java.time.ZoneId"
+                            "java.time.ZonedDateTime"
+                            "java.time.OffsetDateTime"
+                            "java.time.OffsetTime"
+                            "java.time.Clock"
+                            "java.util.Locale"]}
+
  :deps {io.github.juxt/tick
         {:git/url "https://github.com/juxt/tick.git"
          :git/sha "3c2cc4e809c21476f63470cd3e5cb2ff8fa5ef69"}}
