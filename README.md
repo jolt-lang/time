@@ -7,7 +7,7 @@ The library provides the `java.time.*` surface (`Instant`, `LocalDate`,
 `ZonedDateTime`, `Duration`, `DateTimeFormatter`, …) as a pure-Clojure host
 shim, then pulls tick and cljc.java-time through `deps.edn` to expose tick's
 idiomatic Clojure API on top. Requiring it installs the shim and gives you the
-tick API.
+tick API. Needs jolt v0.8.2 or newer.
 
 ## Use
 
@@ -34,6 +34,11 @@ resolved by the core `jolt.host/tz-offset-seconds` primitive, which the jolt
 host implements over libc. If that primitive is unavailable, those zones fall
 back to a built-in DST rule table covering the US, EU, AU, and NZ families.
 Fixed offsets (`Z`, `+05:30`) resolve purely in Clojure and never touch libc.
+
+Loading the library also registers the machine's zone as jolt core's default
+zone (through `jolt.host/set-default-zone-provider!`), so `TimeZone/getDefault`,
+a zone-less `SimpleDateFormat` and `ZoneId/systemDefault` name one zone. Core on
+its own reads no system file for this and answers `TZ` or UTC.
 
 ## Test
 
