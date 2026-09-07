@@ -6,6 +6,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install jolt
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -20,8 +22,14 @@ jobs:
           # release asset here: it owns the archive and binary naming (which
           # changed in v0.5.0, when the CLI was renamed from joltc to jolt) and
           # verifies the checksum. Hardcoding either broke this workflow once.
+          # The one thing resolved here is the release tag: left to the script,
+          # "latest" is an unauthenticated api.github.com call, and the quota
+          # for that is shared across every Actions runner on the same IP, so
+          # it answers 403 on a busy hour (the v0.0.9 tag run failed that way).
+          # gh makes the same call with the job's token.
+          tag="$(gh api repos/jolt-lang/jolt/releases/latest -q .tag_name)"
           curl -fsSL https://raw.githubusercontent.com/jolt-lang/jolt/main/install \
-            | bash -s -- --dir "$HOME/.jolt"
+            | bash -s -- --dir "$HOME/.jolt" --version "$tag"
           echo "$HOME/.jolt" >> "$GITHUB_PATH"
       - name: Test
         run: JOLT_PWD="$PWD" jolt -M:test
