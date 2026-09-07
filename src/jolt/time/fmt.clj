@@ -203,10 +203,15 @@
 ;; data of its own. Hand it the bundled tables so an explicit locale renders in its
 ;; own language there too, not only through this library's DateTimeFormatter.
 ;;
-;; Guarded on the point existing, so a jolt older than it still loads this library
-;; and simply keeps ROOT names in SimpleDateFormat. The guard is deliberately
-;; narrow: it swallows the one "not declared" case and rethrows anything else, so a
-;; genuine error in a provider still surfaces.
+;; Guarded on the POINT existing, so a jolt that declares fewer points still loads
+;; this library and simply keeps ROOT names in SimpleDateFormat. The guard is
+;; deliberately narrow: it swallows the one "not declared" case and rethrows
+;; anything else, so a genuine error in a provider still surfaces. The registering
+;; fn itself, jolt.host/register-extension!, is referenced statically: it has been
+;; part of core since extension points arrived (v0.5.13), and looking it up with
+;; `resolve` at load time made every app that requires this namespace resolve a
+;; var by name — which is the one thing `jolt build --tree-shake` cannot follow,
+;; so it kept every def and the compiler image for all of them.
 ;; The same applies to the other two locale-sensitive surfaces core declares:
 ;; :number-symbols (String/format's decimal and grouping separators) and
 ;; :currency-data (NumberFormat/getCurrencyInstance). All three are fed from the
@@ -225,7 +230,7 @@
         (throw e)))))
 
 (defn- register-locale-points! []
-  (when-let [reg (resolve 'jolt.host/register-extension!)]
+  (let [reg host/register-extension!]
     (register-point! reg :date-names
       (for [[id spec] ld/locales]
         [id {:months (:months spec) :months-short (:months-short spec)
