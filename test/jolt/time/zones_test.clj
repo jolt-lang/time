@@ -3,7 +3,8 @@
   Run under JOLT_NO_JAVA_TIME=1."
   (:require [clojure.test :refer [deftest is]]
             [jolt.time.zones])
-  (:import [java.time ZoneOffset ZoneId Instant Clock]))
+  (:import [java.time ZoneOffset ZoneId Instant Clock]
+           [java.util TimeZone]))
 
 (defn- off-at [zone iso]
   (.getTotalSeconds (.getOffset (.getRules (ZoneId/of zone)) (Instant/parse iso))))
@@ -76,3 +77,20 @@
     (is (= (ZoneId/of id) (ZoneId/systemDefault)))
     ;; these were two separate hardcoded "Z" literals and could drift apart
     (is (= (ZoneId/systemDefault) (.getZone (Clock/systemDefaultZone))))))
+
+;; --- core's default zone --------------------------------------------------------
+;; Core's own default zone (TimeZone/getDefault, a zone-less SimpleDateFormat) is
+;; TZ, else what a registered provider answers, else UTC. Loading this library
+;; registers system-zone-id as that provider. Pinned through with-redefs rather
+;; than by comparing the two answers on this machine: on a UTC box (CI) core
+;; answers UTC with or without a provider, and that would prove nothing. Core
+;; consults the provider only with TZ unset, so the check is skipped under TZ.
+(deftest core-default-zone-is-this-library's
+  (when (nil? (System/getenv "TZ"))
+    (with-redefs [jolt.time.zones/system-zone-id (constantly "Asia/Tokyo")]
+      (is (= "Asia/Tokyo" (.getID (TimeZone/getDefault)))))
+    ;; "Z" is this library's spelling of UTC and not a TimeZone id
+    (with-redefs [jolt.time.zones/system-zone-id (constantly "Z")]
+      (is (= "UTC" (.getID (TimeZone/getDefault)))))
+    ;; and with the real lookup, the two entry points name one zone
+    (is (= (ZoneId/systemDefault) (ZoneId/of (.getID (TimeZone/getDefault)))))))

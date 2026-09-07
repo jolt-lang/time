@@ -303,11 +303,17 @@
 ;; Core's own default zone (TimeZone/getDefault, a zone-less SimpleDateFormat or
 ;; Calendar, the deprecated Date getters) is TZ or UTC: it reads no system file.
 ;; This library knows the machine's zone, so it registers that lookup as core's
-;; provider on a jolt that has the seam; core then names one zone with
-;; java.time, and a date formatted either way agrees. An older jolt has no seam
-;; and keeps UTC.
-(when-let [set-provider (resolve 'jolt.host/set-default-zone-provider!)]
-  (set-provider (fn [] (let [z (system-zone-id)] (if (= z "Z") "UTC" z)))))
+;; provider; core then names one zone with java.time, and a date formatted
+;; either way agrees. Core asks the provider only with TZ unset, and reads its
+;; answer as a TimeZone id, so "Z" goes over as "UTC".
+;;
+;; Referenced statically rather than looked up with `resolve`. The seam has been
+;; in core since v0.8.2, and a var resolved by name at load is the one thing
+;; `jolt build --tree-shake` cannot follow, so guarding on it would keep every
+;; def and the compiler image in each app that requires this library (the same
+;; reason register-locale-points! in fmt references its seam statically).
+(host/set-default-zone-provider!
+  (fn [] (let [z (system-zone-id)] (if (= z "Z") "UTC" z))))
 
 (statics! ["ZoneId" "java.time.ZoneId"]
   {"of" (fn [id & _] (zone-id-of-strict id))
