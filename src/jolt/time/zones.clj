@@ -18,6 +18,48 @@
 (defn zo-secs [z] (impl/field z :secs))
 (defn zo? [z] (= :jolt.time/zone-offset (impl/type-of z)))
 
+(defn- invalid-zone-offset! [message]
+  (throw (jolt.host/throwable "java.time.DateTimeException" message)))
+
+(defn- checked-zone-offset-components [hours minutes seconds]
+  (let [h (u/->long hours)
+        m (u/->long minutes)
+        s (u/->long seconds)]
+    (when-not (<= -18 h 18)
+      (invalid-zone-offset!
+       (str "Zone offset hours not in valid range: value " h
+            " is not in the range -18 to 18")))
+    (cond
+      (and (pos? h) (or (neg? m) (neg? s)))
+      (invalid-zone-offset!
+       "Zone offset minutes and seconds must be positive because hours is positive")
+
+      (and (neg? h) (or (pos? m) (pos? s)))
+      (invalid-zone-offset!
+       "Zone offset minutes and seconds must be negative because hours is negative")
+
+      (or (and (pos? m) (neg? s))
+          (and (neg? m) (pos? s)))
+      (invalid-zone-offset!
+       "Zone offset minutes and seconds must have the same sign"))
+    (when-not (<= -59 m 59)
+      (invalid-zone-offset!
+       (str "Zone offset minutes not in valid range: value " m
+            " is not in the range -59 to 59")))
+    (when-not (<= -59 s 59)
+      (invalid-zone-offset!
+       (str "Zone offset seconds not in valid range: value " s
+            " is not in the range -59 to 59")))
+    (when (and (= 18 (abs h)) (or (not (zero? m)) (not (zero? s))))
+      (invalid-zone-offset! "Zone offset not in valid range: -18:00 to +18:00"))
+    (zone-offset (+ (* h 3600) (* m 60) s))))
+
+(defn- checked-zone-offset-seconds [seconds]
+  (let [secs (u/->long seconds)]
+    (when-not (<= (* -18 3600) secs (* 18 3600))
+      (invalid-zone-offset! "Zone offset not in valid range: -18:00 to +18:00"))
+    (zone-offset secs)))
+
 (defn zo-id [secs]
   (if (zero? secs) "Z"
     (let [neg (neg? secs) a (abs secs) h (quot a 3600) m (quot (mod a 3600) 60) s (mod a 60)]
@@ -68,16 +110,21 @@
       (= s "Z") (zone-offset 0)
       (and (pos? (count s)) (#{\+ \-} (nth s 0))
            (re-matches #"[+-](\d|\d{2}|\d{2}:\d{2}|\d{2}:\d{2}:\d{2}|\d{4}|\d{6})" s))
-      (let [secs (parse-zone-offset s)]
-        (if (<= (abs secs) (* 18 3600)) (zone-offset secs) (bad!)))
+      (let [sign (if (= \- (nth s 0)) -1 1)
+            digits (str/replace (subs s 1) ":" "")
+            width (count digits)
+            h (or (parse-long (if (= width 1) digits (subs digits 0 2))) 0)
+            m (if (>= width 4) (or (parse-long (subs digits 2 4)) 0) 0)
+            sec (if (= width 6) (or (parse-long (subs digits 4 6)) 0) 0)]
+        (checked-zone-offset-components (* sign h) (* sign m) (* sign sec)))
       :else (bad!))))
 
 (statics! ["ZoneOffset" "java.time.ZoneOffset"]
   {"of" zone-offset-of-strict
-   "ofTotalSeconds" (fn [n] (zone-offset (u/->long n)))
-   "ofHours" (fn [h] (zone-offset (* (u/->long h) 3600)))
-   "ofHoursMinutes" (fn [h m] (zone-offset (+ (* (u/->long h) 3600) (* (u/->long m) 60))))
-   "ofHoursMinutesSeconds" (fn [h m s] (zone-offset (+ (* (u/->long h) 3600) (* (u/->long m) 60) (u/->long s))))
+   "ofTotalSeconds" checked-zone-offset-seconds
+   "ofHours" (fn [h] (checked-zone-offset-components h 0 0))
+   "ofHoursMinutes" (fn [h m] (checked-zone-offset-components h m 0))
+   "ofHoursMinutesSeconds" checked-zone-offset-components
    "UTC" (zone-offset 0) "MIN" (zone-offset (* -18 3600)) "MAX" (zone-offset (* 18 3600))})
 
 ;; --- offset resolution (pure fallback + core libc primitive) -----------------

@@ -15,6 +15,33 @@
   (is (= 19800 (.getTotalSeconds (ZoneOffset/ofHoursMinutes 5 30))))
   (is (= "-08:00" (str (ZoneOffset/ofHours -8)))))
 
+(deftest zone-offset-validates-java-component-contract
+  (doseq [f [#(ZoneOffset/ofHours 19)
+             #(ZoneOffset/ofHours -19)
+             #(ZoneOffset/ofHoursMinutes 1 60)
+             #(ZoneOffset/ofHoursMinutes 1 -30)
+             #(ZoneOffset/ofHoursMinutes -1 30)
+             #(ZoneOffset/ofHoursMinutesSeconds 0 30 -1)
+             #(ZoneOffset/ofHoursMinutesSeconds 0 -30 1)
+             #(ZoneOffset/ofHoursMinutesSeconds 18 0 1)
+             #(ZoneOffset/ofTotalSeconds 64801)
+             #(ZoneOffset/of "+01:99")
+             #(ZoneOffset/of "+18:00:01")]]
+    (is (thrown? java.time.DateTimeException (f))))
+  (is (= [64800 -64800 1800 -1800 -1]
+         (mapv #(.getTotalSeconds %)
+               [(ZoneOffset/ofHours 18)
+                (ZoneOffset/ofHours -18)
+                (ZoneOffset/ofHoursMinutes 0 30)
+                (ZoneOffset/ofHoursMinutes 0 -30)
+                (ZoneOffset/ofHoursMinutesSeconds 0 0 -1)])))
+  (is (= "Zone offset minutes and seconds must be positive because hours is positive"
+         (try
+           (ZoneOffset/ofHoursMinutes 1 -60)
+           nil
+           (catch java.time.DateTimeException e
+             (ex-message e))))))
+
 (deftest zone-id
   (is (= "America/New_York" (.getId (ZoneId/of "America/New_York"))))
   (is (= "Europe/Paris" (.getId (ZoneId/of "Europe/Paris"))))
