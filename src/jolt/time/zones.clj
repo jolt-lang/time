@@ -300,6 +300,32 @@
       (etc-timezone-zone)
       "Z"))
 
+;; --- and hand that lookup to core ---------------------------------------------
+;; So that ONE process has ONE default zone.
+;;
+;; Core deliberately reads no system file for its own default: jolt.host answers
+;; TZ when it is set, else whatever provider has been registered, else UTC (jolt's
+;; known-divergences.edn records that as a host-model divergence and names this
+;; library as the half that registers one). Nothing ever registered one, so with
+;; TZ unset the two halves of a single process disagreed —
+;; java.time.ZoneId/systemDefault answering America/Toronto while
+;; java.util.TimeZone/getDefault answered UTC, a SimpleDateFormat rendering an
+;; instant four hours from what a DateTimeFormatter rendered for the same instant,
+;; and a java.util.Calendar start-of-day landing five hours from the Instant it
+;; round-tripped through (jolt-epd). This library is the half that knows how to
+;; find the machine's zone, so it is the half that tells core.
+;;
+;; nil for "Z", because "Z" out of system-zone-id means nothing on this machine
+;; said — not "the machine is on UTC". Core reads a nil answer as no answer and
+;; keeps its own UTC default, and its own id for it.
+;;
+;; Resolved by name and guarded exactly as register-locale-points! in fmt.clj is:
+;; a jolt without the setter is one this library still has to load against.
+(defonce ^:private default-zone-registered
+  (boolean (when-let [reg (resolve 'jolt.host/set-default-zone-provider!)]
+             (reg (fn [] (let [id (system-zone-id)] (when (not= "Z" id) id))))
+             true)))
+
 (statics! ["ZoneId" "java.time.ZoneId"]
   {"of" (fn [id & _] (zone-id-of-strict id))
    ;; zone-id-of, not the strict of: system-zone-id has already checked what it

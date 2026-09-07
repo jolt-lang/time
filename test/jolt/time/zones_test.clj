@@ -76,3 +76,22 @@
     (is (= (ZoneId/of id) (ZoneId/systemDefault)))
     ;; these were two separate hardcoded "Z" literals and could drift apart
     (is (= (ZoneId/systemDefault) (.getZone (Clock/systemDefaultZone))))))
+
+;; Loading this namespace hands system-zone-id to core as its default-zone
+;; provider, so java.util.TimeZone/getDefault and ZoneId/systemDefault name ONE
+;; zone in one process. They did not: with TZ unset, core answered UTC while this
+;; library read /etc/localtime, and a SimpleDateFormat and a DateTimeFormatter
+;; rendered the same instant hours apart (jolt-epd).
+;;
+;; Compared by OFFSET at a fixed instant rather than by id. The two sides spell
+;; the same zone differently on purpose — under TZ=UTC core says "UTC" and this
+;; library says "Z" — and an offset is what a rendering actually depends on. The
+;; instant is in January so it is standard time in the northern hemisphere; the
+;; assertion holds in either.
+(deftest core-and-java-time-agree-on-the-default-zone
+  (let [ms 1577880000000                                    ; 2020-01-01T12:00:00Z
+        core-offset (.getOffset (java.util.TimeZone/getDefault) ms)
+        jt-offset (* 1000 (.getTotalSeconds
+                            (.getOffset (.getRules (ZoneId/systemDefault))
+                                        (Instant/ofEpochMilli ms))))]
+    (is (= core-offset jt-offset))))
