@@ -82,3 +82,31 @@
   (is (some? (LocalTime/now (ZoneId/of "Australia/Sydney"))))
   (is (some? (LocalDateTime/now (ZoneId/of "Australia/Sydney"))))
   (is (some? (OffsetDateTime/now (ZoneId/of "Australia/Sydney")))))
+
+;; LocalDateTime/ofInstant and ofEpochSecond read a zone or an offset, so they
+;; live here rather than in core's LocalDateTime (jolt-lang/jolt#1197). Values
+;; certified against the JVM.
+(deftest local-date-time-of-instant
+  (let [i (Instant/parse "2026-09-29T12:34:56.123456789Z")]
+    (is (= "2026-09-29T12:34:56.123456789" (str (LocalDateTime/ofInstant i ZoneOffset/UTC))))
+    (is (= "2026-09-29T14:34:56.123456789" (str (LocalDateTime/ofInstant i (ZoneOffset/ofHours 2)))))
+    ;; a named zone, on both sides of its DST change
+    (is (= "2026-09-29T08:34:56.123456789" (str (LocalDateTime/ofInstant i (ZoneId/of "America/New_York")))))
+    (is (= "2026-01-15T07:00"
+           (str (LocalDateTime/ofInstant (Instant/parse "2026-01-15T12:00:00Z") (ZoneId/of "America/New_York")))))
+    (is (= "2026-09-29T18:04:56.123456789" (str (LocalDateTime/ofInstant i (ZoneId/of "Asia/Kolkata")))))
+    ;; the same answer as the atZone chain it is defined by
+    (doseq [z [ZoneOffset/UTC (ZoneOffset/ofHours -7) (ZoneId/of "Europe/Paris")]]
+      (is (= (.toLocalDateTime (.atZone i z)) (LocalDateTime/ofInstant i z))))))
+
+(deftest local-date-time-of-epoch-second
+  (is (= "2026-09-29T14:34:56" (str (LocalDateTime/ofEpochSecond 1790685296 0 (ZoneOffset/ofHours 2)))))
+  (is (= "2026-09-29T12:34:56" (str (LocalDateTime/ofEpochSecond 1790685296 0 ZoneOffset/UTC))))
+  (is (= "1969-12-31T20:30:00.000000005"
+         (str (LocalDateTime/ofEpochSecond 0 5 (ZoneOffset/ofHoursMinutes -3 -30)))))
+  (is (= "1970-01-01T13:59:59.999999999"
+         (str (LocalDateTime/ofEpochSecond -1 999999999 (ZoneOffset/ofHours 14)))))
+  ;; the JVM's parameter is a ZoneOffset, not a ZoneId
+  (is (thrown? ClassCastException (LocalDateTime/ofEpochSecond 0 0 (ZoneId/of "Europe/Paris"))))
+  (is (thrown-with-msg? java.time.DateTimeException #"NanoOfSecond"
+        (LocalDateTime/ofEpochSecond 0 1000000000 ZoneOffset/UTC))))
