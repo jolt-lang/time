@@ -14,7 +14,7 @@ tick API. Needs jolt v0.8.2 or newer.
 ```clojure
 ;; deps.edn
 {:deps {io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                                  :git/sha "abeee49974c2c4efa2fa75c96d9a379822c6815f"}}}
+                                  :git/sha "faff43aa3260bf79bb3fba10f6d9336190f83281"}}}
 ```
 
 ```clojure
