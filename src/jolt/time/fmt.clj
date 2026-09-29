@@ -74,7 +74,22 @@
             (= \' (nth pattern j)) [(inc j) acc]
             :else (recur (inc j) (str acc (nth pattern j)))))))
 
-(defn format-pattern [pattern v locale]
+;; The ISO_* formatters print the second's fraction the way java.time's
+;; ISO_LOCAL_TIME does -- omitted when zero, else as many digits as carry a
+;; value, up to nine -- and a pattern's fixed-width S never does; so the rule
+;; is a flag on the formatter (`iso-frac`) that the seconds letter reads.
+;; ISO_INSTANT is the exception: it prints the fraction in whole groups of three
+;; (".500", ".000120"), which is the :instant mode.
+(defn- iso-fraction [nano mode]
+  (if (zero? nano)
+    ""
+    (let [s (u/pad-left (str nano) 9)
+          last-digit (loop [i 8] (if (= \0 (nth s i)) (recur (dec i)) i))
+          width (if (= :instant mode) (* 3 (quot (+ last-digit 3) 3)) (inc last-digit))]
+      (str "." (subs s 0 width)))))
+(defn format-pattern
+  ([pattern v locale] (format-pattern pattern v locale nil))
+  ([pattern v locale iso-frac]
   (let [p (parts v)]
     (if-not p (str v)
       (let [[y mo d hh mi se nano dow off zid] p n (count pattern)]
@@ -93,17 +108,20 @@
                   (= c \H) (recur (+ i k) (str out (if (= k 1) (str hh) (u/pad2 hh))))
                   (= c \h) (recur (+ i k) (str out (let [h12 (let [h (mod hh 12)] (if (zero? h) 12 h))] (if (= k 1) (str h12) (u/pad2 h12)))))
                   (= c \m) (recur (+ i k) (str out (if (= k 1) (str mi) (u/pad2 mi))))
-                  (= c \s) (recur (+ i k) (str out (if (= k 1) (str se) (u/pad2 se))))
+                  (= c \s) (recur (+ i k) (str out (if (= k 1) (str se) (u/pad2 se)) (if iso-frac (iso-fraction nano iso-frac) "")))
                   (= c \S) (recur (+ i k) (str out (u/pad-left (str (quot nano (u/pow10 (max 0 (- 9 k))))) k)))
                   (= c \a) (recur (+ i k) (str out (if (< hh 12) "AM" "PM")))
                   (= c \X) (recur (+ i k) (str out (off-iso off (>= k 3) true)))
                   (= c \x) (recur (+ i k) (str out (off-iso off (>= k 3) false)))
                   (= c \Z) (recur (+ i k) (str out (off-iso off (>= k 3) false)))
                   (or (= c \V) (= c \z)) (recur (+ i k) (str out (or zid (off-iso off true true))))
-                  :else (recur (inc i) (str out c)))))))))))
+                  :else (recur (inc i) (str out c))))))))))))
 
 ;; --- DateTimeFormatter -------------------------------------------------------
 (defn formatter [pattern locale] (impl/value :jolt.time/dt-formatter {:pattern pattern :locale (or locale "en")}))
+(defn- iso-formatter
+  ([pattern] (iso-formatter pattern true))
+  ([pattern mode] (impl/value :jolt.time/dt-formatter {:pattern pattern :locale "en" :iso mode})))
 (defn- fmt-pattern [f]
   (or (impl/field f :pattern)
       (let [[kind style] (impl/field f :style)]
@@ -128,10 +146,11 @@
 (declare parse-with-pattern parse-fields-strict parse-zoned-strict strict-parseable?)
 
 (__register-class-methods! :jolt.time/dt-formatter
-  {"format" (fn [self v] (format-pattern (fmt-pattern self) v (fmt-locale self)))
+  {"format" (fn [self v] (format-pattern (fmt-pattern self) v (fmt-locale self) (impl/field self :iso)))
    "withLocale" (fn [self l] (impl/value :jolt.time/dt-formatter
                                          {:pattern (impl/field self :pattern)
                                           :style (impl/field self :style)
+                                          :iso (impl/field self :iso)
                                           :locale (locale-id l)}))
    "withZone" (fn [self _z] self)
    "parse" (fn
@@ -258,16 +277,19 @@
 
 (statics! ["DateTimeFormatter" "java.time.format.DateTimeFormatter"]
   {"ofPattern" (fn [p & r] (formatter (str p) (if (seq r) (locale-id (first r)) "en")))
-   "ISO_LOCAL_DATE" (formatter "yyyy-MM-dd" "en") "ISO_LOCAL_TIME" (formatter "HH:mm:ss" "en")
-   "ISO_LOCAL_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ss" "en")
-   "ISO_DATE" (formatter "yyyy-MM-dd" "en") "ISO_TIME" (formatter "HH:mm:ss" "en")
-   "ISO_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ss" "en")
-   "ISO_INSTANT" (formatter "yyyy-MM-dd'T'HH:mm:ssX" "en")
-   "ISO_OFFSET_DATE_TIME" (formatter "yyyy-MM-dd'T'HH:mm:ssXXX" "en")
-   "ISO_OFFSET_TIME" (formatter "HH:mm:ssXXX" "en")
+   "ISO_LOCAL_DATE" (formatter "yyyy-MM-dd" "en") "ISO_LOCAL_TIME" (iso-formatter "HH:mm:ss")
+   ;; the ISO constants carry :iso, so the second's fraction prints as
+   ;; java.time's do (see iso-fraction); the strict parser already takes an
+   ;; optional fraction after the seconds when the pattern spells no S
+   "ISO_LOCAL_DATE_TIME" (iso-formatter "yyyy-MM-dd'T'HH:mm:ss")
+   "ISO_DATE" (formatter "yyyy-MM-dd" "en") "ISO_TIME" (iso-formatter "HH:mm:ss")
+   "ISO_DATE_TIME" (iso-formatter "yyyy-MM-dd'T'HH:mm:ss")
+   "ISO_INSTANT" (iso-formatter "yyyy-MM-dd'T'HH:mm:ssX" :instant)
+   "ISO_OFFSET_DATE_TIME" (iso-formatter "yyyy-MM-dd'T'HH:mm:ssXXX")
+   "ISO_OFFSET_TIME" (iso-formatter "HH:mm:ssXXX")
    "ISO_OFFSET_DATE" (formatter "yyyy-MM-ddXXX" "en")
    "ISO_ZONED_DATE_TIME" (impl/value :jolt.time/dt-formatter
-                                     {:pattern "yyyy-MM-dd'T'HH:mm:ss.SSSXXX'['VV']'" :locale "en" :iso :zoned})
+                                     {:pattern "yyyy-MM-dd'T'HH:mm:ssXXX'['VV']'" :locale "en" :iso :zoned})
    "ISO_ORDINAL_DATE" (formatter "yyyy-DDD" "en")
    "ISO_WEEK_DATE" (formatter "yyyy-'W'ww-e" "en")
    "BASIC_ISO_DATE" (formatter "yyyyMMdd" "en")
