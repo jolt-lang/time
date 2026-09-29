@@ -352,6 +352,28 @@
   {"now" (fn [& args] (let [[local _] (now-local-nanos (first args))]
                         (l/local-dt (u/floor-div local npd) (u/floor-mod local npd))))})
 
+;; --- LocalDateTime from an instant --------------------------------------------
+;; Both read a zone or an offset, which core does not have, so core's
+;; ofEpochSecond ignores its third argument and core has no ofInstant; these
+;; replace the one and add the other (jolt-lang/jolt#1197). ofInstant is the
+;; wall time atZone gives. ofEpochSecond's parameter is a ZoneOffset on the JVM,
+;; so a ZoneId is a ClassCastException there too, and its nano is range-checked.
+(defn- ldt-of-epoch-second [secs nano off]
+  (when-not (z/zo? off)
+    (throw (jolt.host/throwable "java.lang.ClassCastException"
+                                (str "class " (.getName (class off))
+                                     " cannot be cast to class java.time.ZoneOffset"))))
+  (let [nano (u/->long nano)]
+    (when-not (<= 0 nano 999999999)
+      (throw (jolt.host/throwable "java.time.DateTimeException"
+                                  (str "Invalid value for NanoOfSecond (valid values 0 - 999999999): " nano))))
+    (let [local (+ (* (+ (u/->long secs) (z/zo-secs off)) nps) nano)]
+      (l/local-dt (u/floor-div local npd) (u/floor-mod local npd)))))
+
+(statics! ["LocalDateTime" "java.time.LocalDateTime"]
+  {"ofInstant" (fn [i zone] (zdt-ldt (zoned-of-instant (inst/inst-nanos i) zone)))
+   "ofEpochSecond" ldt-of-epoch-second})
+
 ;; --- the deferred atZone / atOffset ------------------------------------------
 (__register-class-methods! :jolt.time/local-date-time
   {"atZone" (fn [x zone] (zoned-of-ldt x zone))
