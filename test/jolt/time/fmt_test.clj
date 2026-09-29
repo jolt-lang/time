@@ -33,7 +33,18 @@
     (is (= "2026-01-15T12:00:00" (.format DateTimeFormatter/ISO_LOCAL_DATE_TIME (LocalDateTime/of 2026 1 15 12 0 0))))
     ;; what it prints, it parses back
     (is (= (zdt 123456789) (java.time.ZonedDateTime/parse (.format f (zdt 123456789)))))
-    (is (= (zdt 0) (java.time.ZonedDateTime/parse (.format f (zdt 0)))))))
+    (is (= (zdt 0) (java.time.ZonedDateTime/parse (.format f (zdt 0))))))
+  ;; ISO_INSTANT prints the fraction in groups of three digits, not trimmed
+  (is (= ["1970-01-01T00:00:00Z" "1970-01-01T00:00:00.500Z" "1970-01-01T00:00:00.000120Z"
+          "1970-01-01T00:00:00.123456789Z" "1970-01-01T00:00:00.005Z"]
+         (mapv #(.format DateTimeFormatter/ISO_INSTANT (java.time.Instant/ofEpochSecond 0 %))
+               [0 500000000 120000 123456789 5000000])))
+  ;; a locale does not change what an ISO constant is
+  (is (= "12:00:00.5" (.format (.withLocale DateTimeFormatter/ISO_LOCAL_TIME java.util.Locale/US)
+                               (java.time.LocalTime/of 12 0 0 500000000))))
+  (is (= "2026-01-15T12:00:00.5+11:00[Australia/Sydney]"
+         (.format (.withLocale DateTimeFormatter/ISO_ZONED_DATE_TIME java.util.Locale/US)
+                  (java.time.ZonedDateTime/of 2026 1 15 12 0 0 500000000 (java.time.ZoneId/of "Australia/Sydney"))))))
 
 (deftest iso-constants
   (is (= "2020-03-05" (.format DateTimeFormatter/ISO_LOCAL_DATE (LocalDate/of 2020 3 5))))
