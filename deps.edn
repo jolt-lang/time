@@ -28,9 +28,14 @@
                             "java.time.Clock"
                             "java.util.Locale"]}
 
+ ;; cljc.java-time hard-depends on cljs.java-time, its ClojureScript half: .cljs
+ ;; sources plus an 11.7 MB js-joda externs file that nothing on the jolt path
+ ;; loads, but that jolt's build would pack into every binary depending on this
+ ;; library. This library is jolt-only, so no consumer needs the edge.
  :deps {io.github.juxt/tick
         {:git/url "https://github.com/juxt/tick.git"
-         :git/sha "3c2cc4e809c21476f63470cd3e5cb2ff8fa5ef69"}}
+         :git/sha "3c2cc4e809c21476f63470cd3e5cb2ff8fa5ef69"
+         :exclusions [com.widdindustries/cljs.java-time]}}
 
  :aliases
  {:test {:extra-paths ["test" "vendor/tick-test" "vendor/spec-alpha"]
