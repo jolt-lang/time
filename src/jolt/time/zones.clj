@@ -83,7 +83,9 @@
 (declare odt-offset zdt-offset)
 (impl/register-type! :jolt.time/zone-offset
   {:eq (fn [a b] (= (zo-secs a) (zo-secs b))) :hash zo-secs :str (fn [z] (zo-id (zo-secs z)))
-   :cmp (fn [a b] (compare (zo-secs a) (zo-secs b)))
+   ;; ZoneOffset.compareTo orders by DESCENDING total seconds: +05:00 sorts
+   ;; before +02:00, the way offsets are listed from the date line westward
+   :cmp (fn [a b] (- (zo-secs b) (zo-secs a)))
    :classes #{"java.time.ZoneOffset" "ZoneOffset" "java.time.ZoneId" "ZoneId"
               "java.time.temporal.TemporalAccessor" "TemporalAccessor" "java.lang.Comparable" "Comparable"}})
 
@@ -92,7 +94,11 @@
   {"getId" (fn [z] (zo-id (zo-secs z))) "getTotalSeconds" zo-secs
    "getRules" (fn [z] (zone-rules (zo-id (zo-secs z)) (zo-secs z)))
    "normalized" (fn [z] z)
-   "compareTo" (fn [z o] (compare (zo-secs z) (zo-secs o)))
+   "compareTo" (fn [z o]
+                 (when-not (and (impl/jt? o) (zo? o))
+                   (throw (jolt.host/throwable "java.lang.ClassCastException"
+                                               (str "class " (.getName (class o)) " cannot be cast to class java.time.ZoneOffset"))))
+                 (- (zo-secs o) (zo-secs z)))
    "equals" (fn [z o] (boolean (and (impl/jt? o) (zo? o) (= (zo-secs z) (zo-secs o)))))
    "hashCode" zo-secs "toString" (fn [z] (zo-id (zo-secs z)))})
 

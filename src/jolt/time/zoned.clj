@@ -23,6 +23,27 @@
 ;; Declare it so the reference resolves when the method map is compiled.
 (declare odt)
 
+;; --- compareTo ---------------------------------------------------------------
+;; java.time's compareTo casts its argument, so a value of another type is a
+;; ClassCastException, and it answers a field DIFFERENCE where it has one, not a
+;; sign. Core's own types answer that way only in jolt releases after 0.8.22, so the order
+;; of a LocalDateTime is computed here rather than asked of it.
+(defn- cast-to! [pred cls o]
+  (when-not (and (impl/jt? o) (pred o))
+    (throw (jolt.host/throwable "java.lang.ClassCastException"
+                                (str "class " (.getName (class o)) " cannot be cast to class " cls))))
+  o)
+(defn- first-nonzero [& cs] (or (some #(when-not (zero? %) %) cs) 0))
+;; LocalDateTime.compareTo: the date's field differences, then LocalTime's
+;; Integer.compare of each field (the nano of day orders the same way)
+(defn- ldt-cmp [ea na eb nb]
+  (let [[ya ma da] (civil-from-days ea) [yb mb db] (civil-from-days eb)]
+    (first-nonzero (- ya yb) (- ma mb) (- da db) (compare na nb))))
+;; Long.compare on the epoch seconds, then the nano-of-second difference
+(defn- instant-cmp [na nb]
+  (let [sa (u/floor-div na nps) sb (u/floor-div nb nps)]
+    (if (= sa sb) (- (u/floor-mod na nps) (u/floor-mod nb nps)) (compare sa sb))))
+
 ;; --- ZonedDateTime -----------------------------------------------------------
 (defn zdt [ed nod off zid] (impl/value :jolt.time/zoned-date-time {:ed ed :nod nod :off off :zid zid}))
 (defn- zdt-ed [x] (impl/field x :ed))
@@ -63,11 +84,19 @@
       (zoned-of-ldt (l/local-dt (l/parse-iso-date (subs body 0 ti)) (u/parse-hms->nano (subs body (inc ti)))) zone)
       (zoned-of-instant (inst/parse-iso-instant body) (or zone "Z")))))
 
+;; ChronoZonedDateTime.compareTo: the instant, then the local date-time, then
+;; the zone id
+(defn- zdt-cmp [a b]
+  (first-nonzero (instant-cmp (zdt->nanos a) (zdt->nanos b))
+                 (ldt-cmp (zdt-ed a) (zdt-nod a) (zdt-ed b) (zdt-nod b))
+                 ;; String.compareTo: jolt 0.8.22's compare answers strings only by sign
+                 (.compareTo ^String (z/zid-id (zdt-zid a)) (z/zid-id (zdt-zid b)))))
+
 (impl/register-type! :jolt.time/zoned-date-time
   {:eq (fn [a b] (= [(zdt-ed a) (zdt-nod a) (zdt-off a) (z/zid-id (zdt-zid a))]
                     [(zdt-ed b) (zdt-nod b) (zdt-off b) (z/zid-id (zdt-zid b))]))
    :hash (fn [x] (hash (zdt->nanos x))) :str zdt->string
-   :cmp (fn [a b] (compare (zdt->nanos a) (zdt->nanos b)))
+   :cmp zdt-cmp
    :classes #{"java.time.ZonedDateTime" "ZonedDateTime"
               "java.time.chrono.ChronoZonedDateTime" "ChronoZonedDateTime"
               "java.time.temporal.Temporal" "Temporal" "java.time.temporal.TemporalAccessor" "TemporalAccessor"
@@ -126,7 +155,7 @@
     "get" (fn [x f] (t/get-field (zdt-ldt x) (e/cf-name f))) "getLong" (fn [x f] (t/get-field (zdt-ldt x) (e/cf-name f)))
     "isBefore" (fn [x o] (< (zdt->nanos x) (other-nanos o))) "isAfter" (fn [x o] (> (zdt->nanos x) (other-nanos o)))
     "isEqual" (fn [x o] (= (zdt->nanos x) (other-nanos o)))
-    "compareTo" (fn [x o] (compare (zdt->nanos x) (zdt->nanos o)))
+    "compareTo" (fn [x o] (zdt-cmp x (cast-to! zdt? "java.time.chrono.ChronoZonedDateTime" o)))
     "equals" (fn [x o] (boolean (and (impl/jt? o) (zdt? o) (= (zdt->nanos x) (zdt->nanos o)) (= (z/zid-id (zdt-zid x)) (z/zid-id (zdt-zid o))))))
     "hashCode" (fn [x] (hash (zdt->nanos x))) "toString" zdt->string}))
 
@@ -179,9 +208,17 @@
 (defn- offset-of-ldt [ldt off] (odt (l/ldt-epoch-day ldt) (l/ldt-nod ldt) (z/parse-zone-offset (if (impl/jt? off) (z/zo-id (z/zo-secs off)) off))))
 (defn- odt->string [x] (str (l/iso-datetime-str (odt-ed x) (odt-nod x)) (offset-suffix (odt-off x))))
 
+;; OffsetDateTime.compareTo: with one offset, the local date-time alone; else the
+;; instant, with the local date-time breaking a tie
+(defn- odt-cmp [a b]
+  (let [local (ldt-cmp (odt-ed a) (odt-nod a) (odt-ed b) (odt-nod b))]
+    (if (= (odt-off a) (odt-off b))
+      local
+      (first-nonzero (instant-cmp (odt->nanos a) (odt->nanos b)) local))))
+
 (impl/register-type! :jolt.time/offset-date-time
   {:eq (fn [a b] (= (odt->nanos a) (odt->nanos b))) :hash (fn [x] (hash (odt->nanos x))) :str odt->string
-   :cmp (fn [a b] (compare (odt->nanos a) (odt->nanos b)))
+   :cmp odt-cmp
    :classes #{"java.time.OffsetDateTime" "OffsetDateTime" "java.time.temporal.Temporal" "Temporal"
               "java.time.temporal.TemporalAccessor" "TemporalAccessor" "java.lang.Comparable" "Comparable"}})
 
@@ -204,7 +241,7 @@
    "get" (fn [x f] (t/get-field (odt-ldt x) (e/cf-name f))) "getLong" (fn [x f] (t/get-field (odt-ldt x) (e/cf-name f)))
    "isBefore" (fn [x o] (< (odt->nanos x) (other-nanos o))) "isAfter" (fn [x o] (> (odt->nanos x) (other-nanos o)))
    "isEqual" (fn [x o] (= (odt->nanos x) (other-nanos o)))
-   "compareTo" (fn [x o] (compare (odt->nanos x) (odt->nanos o)))
+   "compareTo" (fn [x o] (odt-cmp x (cast-to! odt? "java.time.OffsetDateTime" o)))
    "equals" (fn [x o] (boolean (and (impl/jt? o) (odt? o) (= (odt->nanos x) (odt->nanos o)))))
    "hashCode" (fn [x] (hash (odt->nanos x))) "toString" odt->string})
 
@@ -230,20 +267,22 @@
 (defn- ot-nod [x] (impl/field x :nod)) (defn- ot-off [x] (impl/field x :off))
 (defn- zo-secs* [off] (cond (and (impl/jt? off) (z/zo? off)) (z/zo-secs off)
                             (and (impl/jt? off) (z/zid? off)) (z/zid-off off) :else (z/parse-zone-offset off)))
+(defn- ot? [x] (= :jolt.time/offset-time (impl/type-of x)))
+(defn- ot-cmp [a b]
+  (let [c (compare (- (ot-nod a) (* (ot-off a) nps)) (- (ot-nod b) (* (ot-off b) nps)))]
+    (if (zero? c) (compare (ot-nod a) (ot-nod b)) c)))
 (impl/register-type! :jolt.time/offset-time
   {:eq (fn [a b] (and (= (ot-nod a) (ot-nod b)) (= (ot-off a) (ot-off b)))) :hash (fn [x] (ot-nod x))
    :str (fn [x] (str (u/iso-time-str (ot-nod x)) (offset-suffix (ot-off x))))
    ;; OffsetTime.compareTo: the UTC-equivalent instant first, local time as the
    ;; tie-break.
-   :cmp (fn [a b] (let [c (compare (- (ot-nod a) (* (ot-off a) nps)) (- (ot-nod b) (* (ot-off b) nps)))]
-                    (if (zero? c) (compare (ot-nod a) (ot-nod b)) c)))
+   :cmp ot-cmp
    :classes #{"java.time.OffsetTime" "OffsetTime" "java.time.temporal.Temporal" "Temporal" "java.lang.Comparable" "Comparable"}})
 (__register-class-methods! :jolt.time/offset-time
   {"getHour" (fn [x] (l/lt-hour (ot-nod x))) "getMinute" (fn [x] (l/lt-minute (ot-nod x)))
    "getSecond" (fn [x] (l/lt-second (ot-nod x))) "getNano" (fn [x] (l/lt-nano (ot-nod x)))
    "getOffset" (fn [x] (z/zone-offset (ot-off x))) "toLocalTime" (fn [x] (l/local-time (ot-nod x)))
-   "compareTo" (fn [x o] (let [c (compare (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps)))]
-                           (if (zero? c) (compare (ot-nod x) (ot-nod o)) c)))
+   "compareTo" (fn [x o] (ot-cmp x (cast-to! ot? "java.time.OffsetTime" o)))
    "isBefore" (fn [x o] (< (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps))))
    "isAfter" (fn [x o] (> (- (ot-nod x) (* (ot-off x) nps)) (- (ot-nod o) (* (ot-off o) nps))))
    "equals" (fn [x o] (boolean (and (impl/jt? o) (= :jolt.time/offset-time (impl/type-of o))

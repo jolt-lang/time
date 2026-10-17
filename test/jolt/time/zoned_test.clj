@@ -3,7 +3,7 @@
   JVM-certified values. Run under JOLT_NO_JAVA_TIME=1."
   (:require [clojure.test :refer [deftest is]]
             [jolt.time.zoned])
-  (:import [java.time ZonedDateTime OffsetDateTime LocalDateTime LocalTime LocalDate Instant ZoneId ZoneOffset Clock]
+  (:import [java.time ZonedDateTime OffsetDateTime OffsetTime LocalDateTime LocalTime LocalDate Instant ZoneId ZoneOffset Clock]
            [java.time.format DateTimeFormatter]))
 
 (deftest zoned-date-time
@@ -110,3 +110,31 @@
   (is (thrown? ClassCastException (LocalDateTime/ofEpochSecond 0 0 (ZoneId/of "Europe/Paris"))))
   (is (thrown-with-msg? java.time.DateTimeException #"NanoOfSecond"
         (LocalDateTime/ofEpochSecond 0 1000000000 ZoneOffset/UTC))))
+
+;; compareTo answers what the JDK's does, magnitude included, and casts its
+;; argument: ZoneOffset orders by DESCENDING total seconds; ZonedDateTime and
+;; OffsetDateTime by epoch second, then the nano difference, then the local
+;; date-time (whose date part is a field difference), then the zone id.
+;; JVM-certified on JDK 20.
+(deftest compare-to-jdk-order
+  (let [utc ZoneOffset/UTC
+        cce (fn [f] (try (f) (catch ClassCastException _ :cce)))]
+    (is (= [10800 -10800 ["+05:00" "+02:00" "-01:00"] -895 -1 -1 26 -3 1 -1 -1 1
+            [:cce :cce :cce :cce :cce]]
+           [(compare (ZoneOffset/ofHours 2) (ZoneOffset/ofHours 5))
+            (.compareTo (ZoneOffset/ofHours 5) (ZoneOffset/ofHours 2))
+            (mapv str (sort [(ZoneOffset/ofHours 2) (ZoneOffset/ofHours 5) (ZoneOffset/ofHours -1)]))
+            (compare (ZonedDateTime/of 2020 1 1 0 0 0 5 utc) (ZonedDateTime/of 2020 1 1 0 0 0 900 utc))
+            (compare (ZonedDateTime/of 2020 1 1 0 0 0 0 utc) (ZonedDateTime/of 2020 1 1 0 0 1 0 utc))
+            (compare (ZonedDateTime/of 2020 1 1 12 0 0 0 utc) (ZonedDateTime/of 2020 1 1 14 0 0 0 (ZoneOffset/ofHours 2)))
+            (compare (ZonedDateTime/of 2020 1 1 12 0 0 0 (ZoneId/of "Europe/Paris")) (ZonedDateTime/of 2020 1 1 12 0 0 0 (ZoneOffset/ofHours 1)))
+            (compare (OffsetDateTime/of 2020 1 1 0 0 0 0 utc) (OffsetDateTime/of 2023 5 1 0 0 0 0 utc))
+            (compare (OffsetDateTime/of 2020 1 1 0 0 0 5 utc) (OffsetDateTime/of 2020 1 1 0 0 0 900 (ZoneOffset/ofHours 1)))
+            (compare (OffsetDateTime/of 2020 1 1 12 0 0 0 utc) (OffsetDateTime/of 2020 1 1 14 0 0 0 (ZoneOffset/ofHours 2)))
+            (compare (OffsetTime/of 10 0 0 0 utc) (OffsetTime/of 12 0 0 0 (ZoneOffset/ofHours 2)))
+            (compare (OffsetTime/of 10 0 0 0 utc) (OffsetTime/of 9 0 0 0 utc))
+            (mapv cce [#(.compareTo (ZoneOffset/ofHours 2) 1)
+                       #(.compareTo (ZonedDateTime/of 2020 1 1 0 0 0 0 utc) 1)
+                       #(.compareTo (OffsetDateTime/of 2020 1 1 0 0 0 0 utc) 1)
+                       #(.compareTo (OffsetTime/of 10 0 0 0 utc) 1)
+                       #(.compareTo (ZonedDateTime/of 2020 1 1 0 0 0 0 utc) (OffsetDateTime/of 2020 1 1 0 0 0 0 utc))])]))))
