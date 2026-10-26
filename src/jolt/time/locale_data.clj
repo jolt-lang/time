@@ -5,7 +5,7 @@
   :months-short, :days, :days-short name tables (months January-first, days
   Monday-first). Ids are BCP-47-ish \"lang-COUNTRY\"; \"\" is ROOT. Every value is
   as the reference JVM renders it, including ROOT's wide month/day names, which
-  CLDR abbreviates ("Mar", "Sat") rather than spelling out.")
+  CLDR abbreviates (\"Mar\", \"Sat\") rather than spelling out.")
 
 (def locales
   {""
@@ -625,3 +625,220 @@
 
 (defn months [id full?] (get-in locales [(resolve-id id) (if full? :months :months-short)]))
 (defn days [id full?] (get-in locales [(resolve-id id) (if full? :days :days-short)]))
+
+;; TextStyle's other forms and ChronoField's names, per locale id, measured from
+;; the reference JVM (JDK 21 CLDR): :text holds the NARROW forms and those
+;; *_STANDALONE forms that differ from the format ones (months January-first,
+;; days Monday-first); :field-names the ChronoField display names that differ
+;; from the field's toString. ROOT's are core's own.
+(def display-names
+{"de"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["M" "D" "M" "D" "F" "S" "S"],
+   :months-short-standalone
+   ["Jan"
+    "Feb"
+    "Mär"
+    "Apr"
+    "Mai"
+    "Jun"
+    "Jul"
+    "Aug"
+    "Sep"
+    "Okt"
+    "Nov"
+    "Dez"],
+   :days-short-standalone ["Mo" "Di" "Mi" "Do" "Fr" "Sa" "So"]},
+  :field-names
+  {"AMPM_OF_DAY" "Tageshälfte",
+   "DAY_OF_WEEK" "Wochentag",
+   "ERA" "Epoche",
+   "HOUR_OF_DAY" "Stunde",
+   "MINUTE_OF_HOUR" "Minute",
+   "MONTH_OF_YEAR" "Monat",
+   "SECOND_OF_MINUTE" "Sekunde",
+   "YEAR" "Jahr"}},
+ "en"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["M" "T" "W" "T" "F" "S" "S"]},
+  :field-names
+  {"AMPM_OF_DAY" "AM/PM",
+   "DAY_OF_WEEK" "day of the week",
+   "ERA" "era",
+   "HOUR_OF_DAY" "hour",
+   "MINUTE_OF_HOUR" "minute",
+   "MONTH_OF_YEAR" "month",
+   "SECOND_OF_MINUTE" "second",
+   "YEAR" "year"}},
+ "en-GB"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["M" "T" "W" "T" "F" "S" "S"]},
+  :field-names
+  {"AMPM_OF_DAY" "am/pm",
+   "DAY_OF_WEEK" "day of the week",
+   "ERA" "era",
+   "HOUR_OF_DAY" "hour",
+   "MINUTE_OF_HOUR" "minute",
+   "MONTH_OF_YEAR" "month",
+   "SECOND_OF_MINUTE" "second",
+   "YEAR" "year"}},
+ "en-US"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["M" "T" "W" "T" "F" "S" "S"]},
+  :field-names
+  {"AMPM_OF_DAY" "AM/PM",
+   "DAY_OF_WEEK" "day of the week",
+   "ERA" "era",
+   "HOUR_OF_DAY" "hour",
+   "MINUTE_OF_HOUR" "minute",
+   "MONTH_OF_YEAR" "month",
+   "SECOND_OF_MINUTE" "second",
+   "YEAR" "year"}},
+ "es"
+ {:text
+  {:months-narrow ["E" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["L" "M" "X" "J" "V" "S" "D"]},
+  :field-names
+  {"AMPM_OF_DAY" "a. m./p. m.",
+   "DAY_OF_WEEK" "día de la semana",
+   "ERA" "era",
+   "HOUR_OF_DAY" "hora",
+   "MINUTE_OF_HOUR" "minuto",
+   "MONTH_OF_YEAR" "mes",
+   "SECOND_OF_MINUTE" "segundo",
+   "YEAR" "año"}},
+ "fr"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["L" "M" "M" "J" "V" "S" "D"]},
+  :field-names
+  {"AMPM_OF_DAY" "cadran",
+   "DAY_OF_WEEK" "jour de la semaine",
+   "ERA" "ère",
+   "HOUR_OF_DAY" "heure",
+   "MINUTE_OF_HOUR" "minute",
+   "MONTH_OF_YEAR" "mois",
+   "SECOND_OF_MINUTE" "seconde",
+   "YEAR" "année"}},
+ "it"
+ {:text
+  {:months-narrow ["G" "F" "M" "A" "M" "G" "L" "A" "S" "O" "N" "D"],
+   :days-narrow ["L" "M" "M" "G" "V" "S" "D"]},
+  :field-names
+  {"AMPM_OF_DAY" "AM/PM",
+   "DAY_OF_WEEK" "giorno della settimana",
+   "ERA" "era",
+   "HOUR_OF_DAY" "ora",
+   "MINUTE_OF_HOUR" "minuto",
+   "MONTH_OF_YEAR" "mese",
+   "SECOND_OF_MINUTE" "secondo",
+   "YEAR" "anno"}},
+ "ja"
+ {:text
+  {:months-narrow ["1" "2" "3" "4" "5" "6" "7" "8" "9" "10" "11" "12"],
+   :days-narrow ["月" "火" "水" "木" "金" "土" "日"]},
+  :field-names
+  {"AMPM_OF_DAY" "午前/午後",
+   "DAY_OF_WEEK" "曜日",
+   "ERA" "時代",
+   "HOUR_OF_DAY" "時",
+   "MINUTE_OF_HOUR" "分",
+   "MONTH_OF_YEAR" "月",
+   "SECOND_OF_MINUTE" "秒",
+   "YEAR" "年"}},
+ "ko"
+ {:text
+  {:months-narrow
+   ["1월" "2월" "3월" "4월" "5월" "6월" "7월" "8월" "9월" "10월" "11월" "12월"],
+   :days-narrow ["월" "화" "수" "목" "금" "토" "일"]},
+  :field-names
+  {"AMPM_OF_DAY" "오전/오후",
+   "DAY_OF_WEEK" "요일",
+   "ERA" "연호",
+   "HOUR_OF_DAY" "시",
+   "MINUTE_OF_HOUR" "분",
+   "MONTH_OF_YEAR" "월",
+   "SECOND_OF_MINUTE" "초",
+   "YEAR" "년"}},
+ "nl"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["M" "D" "W" "D" "V" "Z" "Z"]},
+  :field-names
+  {"AMPM_OF_DAY" "a.m./p.m.",
+   "DAY_OF_WEEK" "dag van de week",
+   "ERA" "tijdperk",
+   "HOUR_OF_DAY" "uur",
+   "MINUTE_OF_HOUR" "minuut",
+   "MONTH_OF_YEAR" "maand",
+   "SECOND_OF_MINUTE" "seconde",
+   "YEAR" "jaar"}},
+ "pt"
+ {:text
+  {:months-narrow ["J" "F" "M" "A" "M" "J" "J" "A" "S" "O" "N" "D"],
+   :days-narrow ["S" "T" "Q" "Q" "S" "S" "D"]},
+  :field-names
+  {"AMPM_OF_DAY" "AM/PM",
+   "DAY_OF_WEEK" "dia da semana",
+   "ERA" "era",
+   "HOUR_OF_DAY" "hora",
+   "MINUTE_OF_HOUR" "minuto",
+   "MONTH_OF_YEAR" "mês",
+   "SECOND_OF_MINUTE" "segundo",
+   "YEAR" "ano"}},
+ "ru"
+ {:text
+  {:months-narrow ["Я" "Ф" "М" "А" "М" "И" "И" "А" "С" "О" "Н" "Д"],
+   :days-narrow ["П" "В" "С" "Ч" "П" "С" "В"],
+   :months-standalone
+   ["январь"
+    "февраль"
+    "март"
+    "апрель"
+    "май"
+    "июнь"
+    "июль"
+    "август"
+    "сентябрь"
+    "октябрь"
+    "ноябрь"
+    "декабрь"],
+   :months-short-standalone
+   ["янв."
+    "февр."
+    "март"
+    "апр."
+    "май"
+    "июнь"
+    "июль"
+    "авг."
+    "сент."
+    "окт."
+    "нояб."
+    "дек."]},
+  :field-names
+  {"AMPM_OF_DAY" "AM/PM",
+   "DAY_OF_WEEK" "день недели",
+   "ERA" "эра",
+   "HOUR_OF_DAY" "час",
+   "MINUTE_OF_HOUR" "минута",
+   "MONTH_OF_YEAR" "месяц",
+   "SECOND_OF_MINUTE" "секунда",
+   "YEAR" "год"}},
+ "zh"
+ {:text
+  {:months-narrow ["1" "2" "3" "4" "5" "6" "7" "8" "9" "10" "11" "12"],
+   :days-narrow ["一" "二" "三" "四" "五" "六" "日"]},
+  :field-names
+  {"AMPM_OF_DAY" "上午/下午",
+   "DAY_OF_WEEK" "工作日",
+   "ERA" "纪元",
+   "HOUR_OF_DAY" "小时",
+   "MINUTE_OF_HOUR" "分钟",
+   "MONTH_OF_YEAR" "月",
+   "SECOND_OF_MINUTE" "秒",
+   "YEAR" "年"}}})

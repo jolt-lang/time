@@ -213,9 +213,17 @@
       (impl/value :jolt.time/locale {:id lang}))))
 (__register-class-ctor! "Locale" locale-ctor)
 (__register-class-ctor! "java.util.Locale" locale-ctor)
+;; A Locale's id is BCP-47-style ("en-US"), the key its data is registered
+;; under; it prints as the JDK's toString does, language_COUNTRY ("en_US").
+(defn- locale-string [l] (str/replace (impl/field l :id) "-" "_"))
 (impl/register-type! :jolt.time/locale
   {:eq (fn [a b] (= (impl/field a :id) (impl/field b :id))) :hash (fn [l] (hash (impl/field l :id)))
-   :str (fn [l] (impl/field l :id)) :cmp nil :classes #{"java.util.Locale" "Locale"}})
+   :str locale-string :cmp nil :classes #{"java.util.Locale" "Locale"}})
+(__register-class-methods! :jolt.time/locale
+  {"toString" locale-string
+   "toLanguageTag" (fn [l] (let [id (impl/field l :id)] (if (= id "") "und" id)))
+   "getLanguage" (fn [l] (first (str/split (impl/field l :id) #"-")))
+   "getCountry" (fn [l] (or (second (str/split (impl/field l :id) #"-")) ""))})
 
 ;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
 ;; :date-names extension point and carries ROOT alone, because core has no locale
@@ -240,20 +248,35 @@
 ;; library keeps working against a jolt that has only some of them.
 (defn- register-point! [reg point entries]
   (try
-    (doseq [[id data] entries :when (not= id "")]
-      (reg point id data))
+    ;; under the id and, for language-COUNTRY, under the Locale's printed form
+    ;; too ("en_US"): a jolt before 0.9 looks the data up by that
+    (doseq [[id data] entries :when (not= id "")
+            k (distinct [id (str/replace id "-" "_")])]
+      (reg point k data))
     true
     (catch Exception e
-      (if (re-find #"no extension point" (or (ex-message e) ""))
+      ;; an undeclared point, or a field an older jolt's point does not declare
+      ;; (the caller falls back to the fields it has)
+      (if (re-find #"no extension point|has unknown field" (or (ex-message e) ""))
         false
         (throw e)))))
 
 (defn- register-locale-points! []
   (let [reg host/register-extension!]
-    (register-point! reg :date-names
-      (for [[id spec] ld/locales]
-        [id {:months (:months spec) :months-short (:months-short spec)
-             :days (:days spec) :days-short (:days-short spec)}]))
+    ;; the narrow and standalone forms ride on :date-names: a jolt whose point
+    ;; does not declare those fields refuses the entry, so it falls back to the
+    ;; four it always had
+    (when-not (register-point! reg :date-names
+                (for [[id spec] ld/locales]
+                  [id (merge {:months (:months spec) :months-short (:months-short spec)
+                              :days (:days spec) :days-short (:days-short spec)}
+                             (get-in ld/display-names [id :text]))]))
+      (register-point! reg :date-names
+        (for [[id spec] ld/locales]
+          [id {:months (:months spec) :months-short (:months-short spec)
+               :days (:days spec) :days-short (:days-short spec)}])))
+    (register-point! reg :field-names
+      (for [[id spec] ld/display-names] [id {:names (:field-names spec)}]))
     (register-point! reg :number-symbols nd/number-symbols)
     (register-point! reg :currency-data nd/currency)
     true))
@@ -261,6 +284,32 @@
 ;; register-point! already tolerates an undeclared point per point, so this only
 ;; has to run once.
 (defonce ^:private locale-points-registered (boolean (register-locale-points!)))
+
+;; TextStyle: the six styles a text field renders in, in JDK declaration order,
+;; declared through jolt.host/register-enum! as FormatStyle is below. Month,
+;; DayOfWeek and ChronoField's getDisplayName take one (core java.time), and read
+;; this library's names through the :date-names and :field-names points.
+(def ^:private text-style-names ["FULL" "FULL_STANDALONE" "SHORT" "SHORT_STANDALONE" "NARROW" "NARROW_STANDALONE"])
+(def ^:private text-style-ordinal (zipmap text-style-names (range)))
+(def ^:private text-styles
+  (mapv (fn [s] (impl/value :jolt.time/text-style {:style s})) text-style-names))
+(defn- text-style [n] (nth text-styles (text-style-ordinal n)))
+(defn- text-style-name [s] (impl/field s :style))
+(defn- standalone? [s] (str/ends-with? (text-style-name s) "_STANDALONE"))
+(impl/register-type! :jolt.time/text-style
+  {:eq (fn [a b] (= (text-style-name a) (text-style-name b))) :hash (fn [s] (hash (text-style-name s)))
+   :str text-style-name
+   :enum? true
+   :cmp (fn [a b] (- (text-style-ordinal (text-style-name a)) (text-style-ordinal (text-style-name b))))
+   :classes #{"java.time.format.TextStyle" "TextStyle"
+              "java.lang.Comparable" "Comparable" "java.lang.Enum" "Enum"}})
+(__register-class-methods! :jolt.time/text-style
+  {"isStandalone" (fn [s] (standalone? s))
+   "asStandalone" (fn [s] (if (standalone? s) s (text-style (str (text-style-name s) "_STANDALONE"))))
+   "asNormal" (fn [s] (if (standalone? s) (text-style (subs (text-style-name s) 0 (- (count (text-style-name s)) 11))) s))})
+(if-let [register-enum! (resolve 'jolt.host/register-enum!)]
+  (register-enum! "java.time.format.TextStyle" (mapv vector text-style-names text-styles))
+  (statics! ["TextStyle" "java.time.format.TextStyle"] (zipmap text-style-names text-styles)))
 
 ;; FormatStyle is an enum: its constants in JDK declaration order, declared
 ;; through jolt.host/register-enum! (values, valueOf, ordinal, compareTo,
