@@ -262,12 +262,26 @@
 ;; has to run once.
 (defonce ^:private locale-points-registered (boolean (register-locale-points!)))
 
+;; FormatStyle is an enum: its constants in JDK declaration order, declared
+;; through jolt.host/register-enum! (values, valueOf, ordinal, compareTo,
+;; EnumSet, the #object print form). An older jolt without register-enum!
+;; still gets the constants as plain statics.
+(def ^:private style-names ["FULL" "LONG" "MEDIUM" "SHORT"])
 (def ^:private style-key {"SHORT" :short "MEDIUM" :medium "LONG" :long "FULL" :full})
-(statics! ["FormatStyle" "java.time.format.FormatStyle"]
-  (into {} (map (fn [s] [s (impl/value :jolt.time/format-style {:style s})]) ["SHORT" "MEDIUM" "LONG" "FULL"])))
+(def ^:private style-ordinal (zipmap style-names (range)))
+(def ^:private format-styles
+  (mapv (fn [s] (impl/value :jolt.time/format-style {:style s})) style-names))
 (impl/register-type! :jolt.time/format-style
   {:eq (fn [a b] (= (impl/field a :style) (impl/field b :style))) :hash (fn [s] (hash (impl/field s :style)))
-   :str (fn [s] (impl/field s :style)) :cmp nil :classes #{"java.time.format.FormatStyle" "FormatStyle"}})
+   :str (fn [s] (impl/field s :style))
+   :enum? true
+   ;; Enum.compareTo: the ordinal difference
+   :cmp (fn [a b] (- (style-ordinal (impl/field a :style)) (style-ordinal (impl/field b :style))))
+   :classes #{"java.time.format.FormatStyle" "FormatStyle"
+              "java.lang.Comparable" "Comparable" "java.lang.Enum" "Enum"}})
+(if-let [register-enum! (resolve 'jolt.host/register-enum!)]
+  (register-enum! "java.time.format.FormatStyle" (mapv vector style-names format-styles))
+  (statics! ["FormatStyle" "java.time.format.FormatStyle"] (zipmap style-names format-styles)))
 (defn- style-of [fs] (impl/field fs :style))
 ;; ofLocalized* defers pattern resolution: the pattern depends on the locale,
 ;; which .withLocale supplies after construction, so the value carries
@@ -324,12 +338,14 @@
    ;; zeros toward minWidth, which a pattern string can't express. Only the
    ;; second-fraction fields map onto 'S'.
    "appendFraction" (fn [b field _min-w max-w point]
-                      (let [fname (str field)
+                      ;; .name, not str: a ChronoField's toString is its
+                      ;; display name (NanoOfSecond) on the JDK
+                      (let [fname (if (instance? Enum field) (.name field) (str field))
                             width (case fname
                                     "NANO_OF_SECOND" (min (u/->long max-w) 9)
                                     "MICRO_OF_SECOND" (min (u/->long max-w) 6)
                                     "MILLI_OF_SECOND" (min (u/->long max-w) 3)
-                                    (throw (ex-info (str "appendFraction: unsupported field " fname)
+                                    (throw (ex-info (str "appendFraction: unsupported field " field)
                                                     {:field fname})))]
                         (b-append! b (str (when point ".") (apply str (repeat width "S"))))))
    "parseCaseInsensitive" (fn [b] b) "parseLenient" (fn [b] b)
