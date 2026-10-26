@@ -264,3 +264,31 @@
       (is (= "year" (field java.time.temporal.ChronoField/YEAR java.util.Locale/US)))
       (is (= "Year" (field java.time.temporal.ChronoField/YEAR java.util.Locale/ROOT)))
       (is (= "EpochDay" (field java.time.temporal.ChronoField/EPOCH_DAY java.util.Locale/FRENCH))))))
+
+;; A Locale is language, script, country and variant, printed and tagged as the
+;; JDK does (every value as JDK 21 renders it).
+(deftest locale-parts
+  (let [row (fn [l] [(str l) (.toLanguageTag l) (.getLanguage l) (.getCountry l) (.getVariant l) (.getScript l)])]
+    (is (= ["zh_TW_#Hant" "zh-Hant-TW" "zh" "TW" "" "Hant"] (row (java.util.Locale/forLanguageTag "zh-Hant-TW"))))
+    (is (= ["" "und" "" "" "" ""] (row (java.util.Locale/forLanguageTag "und"))))
+    (is (= ["en_US_POSIX" "en-US-POSIX" "en" "US" "POSIX" ""] (row (java.util.Locale. "en" "US" "POSIX"))))
+    (is (= ["de_CH_x" "de-CH-x-lvariant-x" "de" "CH" "x" ""] (row (java.util.Locale. "de" "CH" "x"))))
+    (is (= ["sr__#Latn" "sr-Latn" "sr" "" "" "Latn"] (row (java.util.Locale/forLanguageTag "sr-Latn"))))
+    (is (= ["es_419" "es-419" "es" "419" "" ""] (row (java.util.Locale/forLanguageTag "es-419"))))
+    (is (= ["en_US" "en-US" "en" "US" "" ""] (row (java.util.Locale. "EN" "us"))))
+    (is (= ["fr_CA" "fr-CA" "fr" "CA" "" ""] (row (java.util.Locale/of "fr" "CA"))))
+    (is (= (java.util.Locale. "en" "US" "POSIX") (java.util.Locale/forLanguageTag "en-US-POSIX")))
+    (is (not= (java.util.Locale. "en" "US" "POSIX") java.util.Locale/US))))
+
+;; A country falls back to its language for names, and carries its own number
+;; and currency symbols where the JDK's differ (JDK 21).
+(deftest country-locales
+  (when (field-names-point?)
+    (is (= "März" (.getDisplayName java.time.Month/MARCH java.time.format.TextStyle/FULL java.util.Locale/GERMANY)))
+    (is (= "Jahr" (.getDisplayName java.time.temporal.ChronoField/YEAR (java.util.Locale. "de" "AT"))))
+    (is (= "1\u00a0234\u00a0567,50" (String/format (java.util.Locale. "de" "AT") "%,.2f" (to-array [1234567.5]))))
+    (is (= "1’234’567.50" (String/format (java.util.Locale. "de" "CH") "%,.2f" (to-array [1234567.5]))))
+    (is (= "1,234,567.50" (String/format (java.util.Locale. "es" "MX") "%,.2f" (to-array [1234567.5]))))
+    (is (= "€\u00a01.234,50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "AT")) 1234.5)))
+    (is (= "$1,234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "es" "MX")) 1234.5)))
+    (is (= "CHF\u00a01’234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "CH")) 1234.5)))))
