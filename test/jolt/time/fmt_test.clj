@@ -1,7 +1,8 @@
 (ns jolt.time.fmt-test
   "Stage 6 gate: DateTimeFormatter. JVM-certified values. Run under JOLT_NO_JAVA_TIME=1."
   (:require [clojure.test :refer [deftest is]]
-            [jolt.time.fmt])
+            [jolt.time.fmt]
+            [jolt.time.impl])
   (:import [java.time LocalDate LocalDateTime]
            [java.time.format DateTimeFormatter FormatStyle]))
 
@@ -156,3 +157,59 @@
     (is (= "12:34:56+01:00"
            (.format f (java.time.OffsetDateTime/of 2020 1 1 12 34 56 0
                                                    (java.time.ZoneOffset/ofHours 1)))))))
+
+;; On the JDK (str ChronoField/NANO_OF_SECOND) is the display name
+;; "NanoOfSecond"; only .name is the constant. Run the builder with the field's
+;; str answering the display name, as it does there, so nothing in the builder
+;; leans on str for the constant name.
+(defn- display-name [nm]
+  (apply str (map (fn [part] (str (subs part 0 1) (.toLowerCase (subs part 1))))
+                  (.split nm "_"))))
+
+(defn- with-jdk-field-str [f]
+  (let [reg @#'jolt.time.impl/registry
+        spec (get @reg :jolt.time/chrono-field)]
+    (swap! reg assoc :jolt.time/chrono-field
+           (assoc spec :str (fn [fld] (display-name (jolt.time.impl/field fld :name)))))
+    (try (f) (finally (swap! reg assoc :jolt.time/chrono-field spec)))))
+
+(deftest builder-reads-field-name-not-str
+  (with-jdk-field-str
+    (fn []
+      (is (= "NanoOfSecond" (str java.time.temporal.ChronoField/NANO_OF_SECOND)))
+      (let [t (java.time.LocalTime/of 12 34 56 123456789)
+            build (fn [field w]
+                    (.toFormatter (doto (java.time.format.DateTimeFormatterBuilder.)
+                                    (.appendPattern "HH:mm:ss")
+                                    (.appendFraction field 0 w true))))]
+        (is (= "12:34:56.123456789"
+               (.format (build java.time.temporal.ChronoField/NANO_OF_SECOND 9) t)))
+        (is (= "12:34:56.123456"
+               (.format (build java.time.temporal.ChronoField/MICRO_OF_SECOND 6) t)))
+        (is (= "12:34:56.123"
+               (.format (build java.time.temporal.ChronoField/MILLI_OF_SECOND 3) t)))))))
+
+;; FormatStyle is a JDK enum: constants in declaration order, the Enum methods,
+;; and the #object print form. Values from JDK 21. Needs a jolt that has
+;; jolt.host/register-enum!; an older one only gets the constants.
+(deftest format-style-enum
+  (is (= "MEDIUM" (str FormatStyle/MEDIUM)))
+  (when (resolve 'jolt.host/register-enum!)
+  (is (= ["FULL" "LONG" "MEDIUM" "SHORT"] (mapv str (FormatStyle/values))))
+  (is (= ["FULL" "LONG" "MEDIUM" "SHORT"] (mapv #(.name %) (FormatStyle/values))))
+  (is (= [0 1 2 3] (mapv #(.ordinal %) (FormatStyle/values))))
+  (is (= -3 (.compareTo FormatStyle/FULL FormatStyle/SHORT)))
+  (is (= FormatStyle/MEDIUM (FormatStyle/valueOf "MEDIUM")))
+  (is (identical? FormatStyle/MEDIUM (FormatStyle/valueOf "MEDIUM")))
+  (is (= FormatStyle/LONG (Enum/valueOf FormatStyle "LONG")))
+  (is (thrown? IllegalArgumentException (FormatStyle/valueOf "NOPE")))
+  (is (.isEnum FormatStyle))
+  (is (instance? Enum FormatStyle/SHORT))
+  (is (= FormatStyle (.getDeclaringClass FormatStyle/SHORT)))
+  (is (= [FormatStyle/FULL FormatStyle/SHORT] (sort [FormatStyle/SHORT FormatStyle/FULL])))
+  (is (re-matches #"#object\[java\.time\.format\.FormatStyle 0x[0-9a-f]+ \"SHORT\"\]"
+                  (pr-str FormatStyle/SHORT)))
+  (is (= 4 (count (java.util.EnumSet/allOf FormatStyle))))
+  ;; still drives the localized formatters
+  (is (= "Mar 5, 2020" (.format (DateTimeFormatter/ofLocalizedDate (FormatStyle/valueOf "MEDIUM"))
+                                (LocalDate/of 2020 3 5))))))
