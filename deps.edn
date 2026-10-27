@@ -20,6 +20,7 @@
  :jolt/provides {jolt.time ["java.time.format.DateTimeFormatter"
                             "java.time.format.DateTimeFormatterBuilder"
                             "java.time.format.FormatStyle"
+                            "java.time.format.TextStyle"
                             "java.time.ZoneOffset"
                             "java.time.ZoneId"
                             "java.time.ZonedDateTime"

@@ -213,3 +213,82 @@
   ;; still drives the localized formatters
   (is (= "Mar 5, 2020" (.format (DateTimeFormatter/ofLocalizedDate (FormatStyle/valueOf "MEDIUM"))
                                 (LocalDate/of 2020 3 5))))))
+
+;; TextStyle is an enum, and drives Month / DayOfWeek / ChronoField
+;; .getDisplayName through the names this library registers. The display names
+;; need a jolt whose java.time reads them (the :field-names point); an older one
+;; still gets the TextStyle constants.
+(defn- field-names-point? []
+  (try (jolt.host/extension-value :field-names "") true (catch Exception _ false)))
+(deftest text-style-enum
+  (is (= "SHORT" (str java.time.format.TextStyle/SHORT)))
+  (when (resolve 'jolt.host/register-enum!)
+    (is (= ["FULL" "FULL_STANDALONE" "SHORT" "SHORT_STANDALONE" "NARROW" "NARROW_STANDALONE"]
+           (mapv #(.name %) (java.time.format.TextStyle/values))))
+    (is (= [false true false true false true] (mapv #(.isStandalone %) (java.time.format.TextStyle/values))))
+    (is (= java.time.format.TextStyle/SHORT_STANDALONE (.asStandalone java.time.format.TextStyle/SHORT)))
+    (is (= java.time.format.TextStyle/NARROW (.asNormal java.time.format.TextStyle/NARROW_STANDALONE)))
+    (is (identical? java.time.format.TextStyle/FULL (java.time.format.TextStyle/valueOf "FULL")))
+    (is (.isEnum java.time.format.TextStyle))))
+(deftest locale-prints-as-the-jdk
+  (is (= "en_US" (str java.util.Locale/US)))
+  (is (= "" (str java.util.Locale/ROOT)))
+  (is (= "en-US" (.toLanguageTag java.util.Locale/US)))
+  (is (= "und" (.toLanguageTag java.util.Locale/ROOT)))
+  (is (= ["en" "US"] [(.getLanguage java.util.Locale/US) (.getCountry java.util.Locale/US)]))
+  ;; locale data still resolves for a Locale printed with an underscore
+  (is (= "décembre" (.format (java.text.SimpleDateFormat. "MMMM" java.util.Locale/FRENCH)
+                             (java.util.Date. (* 1000 60 60 24 340))))))
+(deftest display-names-by-style-and-locale
+  (when (field-names-point?)
+    (let [m java.time.Month/MARCH d java.time.DayOfWeek/SATURDAY
+          styles [java.time.format.TextStyle/FULL java.time.format.TextStyle/SHORT java.time.format.TextStyle/NARROW
+                  java.time.format.TextStyle/FULL_STANDALONE java.time.format.TextStyle/SHORT_STANDALONE]
+          month (fn [l] (mapv #(.getDisplayName m % l) styles))
+          dow (fn [l] (mapv #(.getDisplayName d % l) (take 3 styles)))
+          field (fn [f l] (.getDisplayName f l))]
+      ;; every value as JDK 21 renders it
+      (is (= ["Mar" "Mar" "3" "Mar" "Mar"] (month java.util.Locale/ROOT)))
+      (is (= ["March" "Mar" "M" "March" "Mar"] (month java.util.Locale/US)))
+      (is (= ["mars" "mars" "M" "mars" "mars"] (month java.util.Locale/FRENCH)))
+      (is (= ["März" "März" "M" "März" "Mär"] (month java.util.Locale/GERMAN)))
+      (is (= ["3月" "3月" "3" "3月" "3月"] (month java.util.Locale/JAPANESE)))
+      (is (= ["Saturday" "Sat" "S"] (dow java.util.Locale/US)))
+      (is (= ["samedi" "sam." "S"] (dow java.util.Locale/FRENCH)))
+      (is (= ["土曜日" "土" "土"] (dow java.util.Locale/JAPANESE)))
+      (is (= ["zaterdag" "za" "Z"] (dow (java.util.Locale. "nl"))))
+      (is (= "Day of the Week" (field java.time.temporal.ChronoField/DAY_OF_WEEK java.util.Locale/ROOT)))
+      (is (= "day of the week" (field java.time.temporal.ChronoField/DAY_OF_WEEK java.util.Locale/US)))
+      (is (= "jour de la semaine" (field java.time.temporal.ChronoField/DAY_OF_WEEK java.util.Locale/FRENCH)))
+      (is (= "Tageshälfte" (field java.time.temporal.ChronoField/AMPM_OF_DAY java.util.Locale/GERMAN)))
+      (is (= "year" (field java.time.temporal.ChronoField/YEAR java.util.Locale/US)))
+      (is (= "Year" (field java.time.temporal.ChronoField/YEAR java.util.Locale/ROOT)))
+      (is (= "EpochDay" (field java.time.temporal.ChronoField/EPOCH_DAY java.util.Locale/FRENCH))))))
+
+;; A Locale is language, script, country and variant, printed and tagged as the
+;; JDK does (every value as JDK 21 renders it).
+(deftest locale-parts
+  (let [row (fn [l] [(str l) (.toLanguageTag l) (.getLanguage l) (.getCountry l) (.getVariant l) (.getScript l)])]
+    (is (= ["zh_TW_#Hant" "zh-Hant-TW" "zh" "TW" "" "Hant"] (row (java.util.Locale/forLanguageTag "zh-Hant-TW"))))
+    (is (= ["" "und" "" "" "" ""] (row (java.util.Locale/forLanguageTag "und"))))
+    (is (= ["en_US_POSIX" "en-US-POSIX" "en" "US" "POSIX" ""] (row (java.util.Locale. "en" "US" "POSIX"))))
+    (is (= ["de_CH_x" "de-CH-x-lvariant-x" "de" "CH" "x" ""] (row (java.util.Locale. "de" "CH" "x"))))
+    (is (= ["sr__#Latn" "sr-Latn" "sr" "" "" "Latn"] (row (java.util.Locale/forLanguageTag "sr-Latn"))))
+    (is (= ["es_419" "es-419" "es" "419" "" ""] (row (java.util.Locale/forLanguageTag "es-419"))))
+    (is (= ["en_US" "en-US" "en" "US" "" ""] (row (java.util.Locale. "EN" "us"))))
+    (is (= ["fr_CA" "fr-CA" "fr" "CA" "" ""] (row (java.util.Locale/of "fr" "CA"))))
+    (is (= (java.util.Locale. "en" "US" "POSIX") (java.util.Locale/forLanguageTag "en-US-POSIX")))
+    (is (not= (java.util.Locale. "en" "US" "POSIX") java.util.Locale/US))))
+
+;; A country falls back to its language for names, and carries its own number
+;; and currency symbols where the JDK's differ (JDK 21).
+(deftest country-locales
+  (when (field-names-point?)
+    (is (= "März" (.getDisplayName java.time.Month/MARCH java.time.format.TextStyle/FULL java.util.Locale/GERMANY)))
+    (is (= "Jahr" (.getDisplayName java.time.temporal.ChronoField/YEAR (java.util.Locale. "de" "AT"))))
+    (is (= "1\u00a0234\u00a0567,50" (String/format (java.util.Locale. "de" "AT") "%,.2f" (to-array [1234567.5]))))
+    (is (= "1’234’567.50" (String/format (java.util.Locale. "de" "CH") "%,.2f" (to-array [1234567.5]))))
+    (is (= "1,234,567.50" (String/format (java.util.Locale. "es" "MX") "%,.2f" (to-array [1234567.5]))))
+    (is (= "€\u00a01.234,50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "AT")) 1234.5)))
+    (is (= "$1,234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "es" "MX")) 1234.5)))
+    (is (= "CHF\u00a01’234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "CH")) 1234.5)))))

@@ -189,33 +189,83 @@
 ;; formatting, which is this library (RFC 0008). Carry the constants and
 ;; getDefault/setDefault the surface needs (tick asks for Locale/getDefault); the
 ;; base default is English.
+;;
+;; A Locale is its language, script, country and variant. Its :id, the key its
+;; data is registered under, is the BCP-47-style join of the first three
+;; ("en-US", "zh-Hant-TW", "" for ROOT); jolt core narrows a missed id to its
+;; language. It prints as the JDK's toString does: language_COUNTRY_VARIANT, then
+;; _#Script ("zh_TW_#Hant", "sr__#Latn").
+(defn- mk-locale [lang script country variant]
+  (impl/value :jolt.time/locale
+              {:id (str/join "-" (remove empty? [lang script country]))
+               :lang lang :script script :country country :variant variant}))
+(defn- lf [l k] (or (impl/field l k) ""))
+(defn- locale-of
+  ([lang] (locale-of lang "" ""))
+  ([lang country] (locale-of lang country ""))
+  ([lang country variant]
+   (mk-locale (str/lower-case (str lang)) "" (str/upper-case (str country)) (str variant))))
+(defn- bcp-variant? [v] (boolean (re-matches #"(?i)[0-9a-z]{5,8}|[0-9][0-9a-z]{3}" v)))
+(defn- parse-tag [tag]
+  (let [[lang & more] (str/split (str tag) #"-")
+        lang (str/lower-case (or lang ""))
+        lang (if (= lang "und") "" lang)]
+    (loop [xs more script "" country "" variants []]
+      (let [x (first xs)]
+        (cond
+          (nil? x) (mk-locale lang script country (str/join "_" variants))
+          (and (= "x" (str/lower-case x)) (= "lvariant" (some-> (second xs) str/lower-case)))
+          (mk-locale lang script country (str/join "_" (concat variants (drop 2 xs))))
+          (and (empty? script) (empty? country) (empty? variants) (re-matches #"(?i)[a-z]{4}" x))
+          (recur (rest xs) (str (str/upper-case (subs x 0 1)) (str/lower-case (subs x 1))) country variants)
+          (and (empty? country) (empty? variants) (re-matches #"(?i)[a-z]{2}|[0-9]{3}" x))
+          (recur (rest xs) script (str/upper-case x) variants)
+          (bcp-variant? x) (recur (rest xs) script country (conj variants x))
+          ;; an extension or private-use section: not modeled, ends the parse
+          :else (mk-locale lang script country (str/join "_" variants)))))))
+(defn- locale-string [l]
+  (let [lang (lf l :lang) script (lf l :script) country (lf l :country) variant (lf l :variant)]
+    (str lang
+         (when (or (seq country) (seq variant) (seq script)) (str "_" country))
+         (when (seq variant) (str "_" variant))
+         (when (seq script) (str "_#" script)))))
+(defn- locale-tag [l]
+  (let [lang (lf l :lang) variant (lf l :variant)
+        base (str/join "-" (remove empty? [(if (empty? lang) "und" lang) (lf l :script) (lf l :country)]))]
+    (cond (empty? variant) base
+          (every? bcp-variant? (str/split variant #"_")) (str base "-" (str/replace variant "_" "-"))
+          :else (str base "-x-lvariant-" (str/replace variant "_" "-")))))
 (statics! ["Locale" "java.util.Locale"]
-  {"getDefault" (fn [& _] (impl/value :jolt.time/locale {:id "en"}))
+  {"getDefault" (fn [& _] (locale-of "en"))
    "setDefault" (fn [_] nil)
-   "forLanguageTag" (fn [tag] (impl/value :jolt.time/locale {:id (str tag)}))
-   "ENGLISH" (impl/value :jolt.time/locale {:id "en"}) "US" (impl/value :jolt.time/locale {:id "en-US"})
-   "FRENCH" (impl/value :jolt.time/locale {:id "fr"}) "FRANCE" (impl/value :jolt.time/locale {:id "fr-FR"})
-   "GERMAN" (impl/value :jolt.time/locale {:id "de"}) "GERMANY" (impl/value :jolt.time/locale {:id "de-DE"})
-   "ITALIAN" (impl/value :jolt.time/locale {:id "it"}) "ITALY" (impl/value :jolt.time/locale {:id "it-IT"})
-   "JAPANESE" (impl/value :jolt.time/locale {:id "ja"}) "JAPAN" (impl/value :jolt.time/locale {:id "ja-JP"})
-   "KOREAN" (impl/value :jolt.time/locale {:id "ko"}) "KOREA" (impl/value :jolt.time/locale {:id "ko-KR"})
-   "CHINESE" (impl/value :jolt.time/locale {:id "zh"}) "CHINA" (impl/value :jolt.time/locale {:id "zh-CN"})
-   "SIMPLIFIED_CHINESE" (impl/value :jolt.time/locale {:id "zh-CN"}) "TRADITIONAL_CHINESE" (impl/value :jolt.time/locale {:id "zh-TW"})
-   "UK" (impl/value :jolt.time/locale {:id "en-GB"}) "CANADA" (impl/value :jolt.time/locale {:id "en-CA"})
-   "CANADA_FRENCH" (impl/value :jolt.time/locale {:id "fr-CA"}) "ROOT" (impl/value :jolt.time/locale {:id ""})})
-;; the two-arg ctor joins language and country like the constants do ("de" "DE"
-;; -> "de-DE"); the one-arg ctor's argument is a *language* subtag, so "en_US"
-;; stays malformed and resolves to ROOT at lookup time
-(defn- locale-ctor [lang & r]
-  (let [lang (str/lower-case (str lang))]
-    (if (and (seq r) (seq (str (first r))))
-      (impl/value :jolt.time/locale {:id (str lang "-" (str/upper-case (str (first r))))})
-      (impl/value :jolt.time/locale {:id lang}))))
-(__register-class-ctor! "Locale" locale-ctor)
-(__register-class-ctor! "java.util.Locale" locale-ctor)
+   "forLanguageTag" parse-tag
+   "of" locale-of
+   "ENGLISH" (locale-of "en") "US" (locale-of "en" "US")
+   "FRENCH" (locale-of "fr") "FRANCE" (locale-of "fr" "FR")
+   "GERMAN" (locale-of "de") "GERMANY" (locale-of "de" "DE")
+   "ITALIAN" (locale-of "it") "ITALY" (locale-of "it" "IT")
+   "JAPANESE" (locale-of "ja") "JAPAN" (locale-of "ja" "JP")
+   "KOREAN" (locale-of "ko") "KOREA" (locale-of "ko" "KR")
+   "CHINESE" (locale-of "zh") "CHINA" (locale-of "zh" "CN")
+   "SIMPLIFIED_CHINESE" (locale-of "zh" "CN") "TRADITIONAL_CHINESE" (locale-of "zh" "TW")
+   "UK" (locale-of "en" "GB") "CANADA" (locale-of "en" "CA")
+   "CANADA_FRENCH" (locale-of "fr" "CA") "ROOT" (locale-of "")})
+;; (Locale. lang), (Locale. lang country), (Locale. lang country variant). The
+;; one-arg ctor's argument is a *language* subtag, so "en_US" stays malformed
+;; and resolves to ROOT at lookup time
+(__register-class-ctor! "Locale" locale-of)
+(__register-class-ctor! "java.util.Locale" locale-of)
 (impl/register-type! :jolt.time/locale
-  {:eq (fn [a b] (= (impl/field a :id) (impl/field b :id))) :hash (fn [l] (hash (impl/field l :id)))
-   :str (fn [l] (impl/field l :id)) :cmp nil :classes #{"java.util.Locale" "Locale"}})
+  {:eq (fn [a b] (and (= (impl/field a :id) (impl/field b :id)) (= (lf a :variant) (lf b :variant))))
+   :hash (fn [l] (hash [(impl/field l :id) (lf l :variant)]))
+   :str locale-string :cmp nil :classes #{"java.util.Locale" "Locale"}})
+(__register-class-methods! :jolt.time/locale
+  {"toString" locale-string
+   "toLanguageTag" locale-tag
+   "getLanguage" (fn [l] (lf l :lang))
+   "getScript" (fn [l] (lf l :script))
+   "getCountry" (fn [l] (lf l :country))
+   "getVariant" (fn [l] (lf l :variant))})
 
 ;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
 ;; :date-names extension point and carries ROOT alone, because core has no locale
@@ -240,20 +290,35 @@
 ;; library keeps working against a jolt that has only some of them.
 (defn- register-point! [reg point entries]
   (try
-    (doseq [[id data] entries :when (not= id "")]
-      (reg point id data))
+    ;; under the id and, for language-COUNTRY, under the Locale's printed form
+    ;; too ("en_US"): a jolt before 0.9 looks the data up by that
+    (doseq [[id data] entries :when (not= id "")
+            k (distinct [id (str/replace id "-" "_")])]
+      (reg point k data))
     true
     (catch Exception e
-      (if (re-find #"no extension point" (or (ex-message e) ""))
+      ;; an undeclared point, or a field an older jolt's point does not declare
+      ;; (the caller falls back to the fields it has)
+      (if (re-find #"no extension point|has unknown field" (or (ex-message e) ""))
         false
         (throw e)))))
 
 (defn- register-locale-points! []
   (let [reg host/register-extension!]
-    (register-point! reg :date-names
-      (for [[id spec] ld/locales]
-        [id {:months (:months spec) :months-short (:months-short spec)
-             :days (:days spec) :days-short (:days-short spec)}]))
+    ;; the narrow and standalone forms ride on :date-names: a jolt whose point
+    ;; does not declare those fields refuses the entry, so it falls back to the
+    ;; four it always had
+    (when-not (register-point! reg :date-names
+                (for [[id spec] ld/locales]
+                  [id (merge {:months (:months spec) :months-short (:months-short spec)
+                              :days (:days spec) :days-short (:days-short spec)}
+                             (get-in ld/display-names [id :text]))]))
+      (register-point! reg :date-names
+        (for [[id spec] ld/locales]
+          [id {:months (:months spec) :months-short (:months-short spec)
+               :days (:days spec) :days-short (:days-short spec)}])))
+    (register-point! reg :field-names
+      (for [[id spec] ld/display-names] [id {:names (:field-names spec)}]))
     (register-point! reg :number-symbols nd/number-symbols)
     (register-point! reg :currency-data nd/currency)
     true))
@@ -261,6 +326,33 @@
 ;; register-point! already tolerates an undeclared point per point, so this only
 ;; has to run once.
 (defonce ^:private locale-points-registered (boolean (register-locale-points!)))
+
+;; TextStyle: the six styles a text field renders in, in JDK declaration order,
+;; declared through jolt.host/register-enum! as FormatStyle is below. Month,
+;; DayOfWeek and ChronoField's getDisplayName take one (core java.time), and read
+;; this library's names through the :date-names and :field-names points.
+(def ^:private text-style-names ["FULL" "FULL_STANDALONE" "SHORT" "SHORT_STANDALONE" "NARROW" "NARROW_STANDALONE"])
+(def ^:private text-style-ordinal (zipmap text-style-names (range)))
+(def ^:private text-styles
+  (mapv (fn [s] (impl/value :jolt.time/text-style {:style s})) text-style-names))
+(defn- text-style [n] (nth text-styles (text-style-ordinal n)))
+(defn- text-style-name [s] (impl/field s :style))
+(defn- standalone? [s] (str/ends-with? (text-style-name s) "_STANDALONE"))
+(impl/register-type! :jolt.time/text-style
+  {:eq (fn [a b] (= (text-style-name a) (text-style-name b))) :hash (fn [s] (hash (text-style-name s)))
+   :str text-style-name
+   :class "java.time.format.TextStyle"
+   :enum? true
+   :cmp (fn [a b] (- (text-style-ordinal (text-style-name a)) (text-style-ordinal (text-style-name b))))
+   :classes #{"java.time.format.TextStyle" "TextStyle"
+              "java.lang.Comparable" "Comparable" "java.lang.Enum" "Enum"}})
+(__register-class-methods! :jolt.time/text-style
+  {"isStandalone" (fn [s] (standalone? s))
+   "asStandalone" (fn [s] (if (standalone? s) s (text-style (str (text-style-name s) "_STANDALONE"))))
+   "asNormal" (fn [s] (if (standalone? s) (text-style (subs (text-style-name s) 0 (- (count (text-style-name s)) 11))) s))})
+(if-let [register-enum! (resolve 'jolt.host/register-enum!)]
+  (register-enum! "java.time.format.TextStyle" (mapv vector text-style-names text-styles))
+  (statics! ["TextStyle" "java.time.format.TextStyle"] (zipmap text-style-names text-styles)))
 
 ;; FormatStyle is an enum: its constants in JDK declaration order, declared
 ;; through jolt.host/register-enum! (values, valueOf, ordinal, compareTo,
