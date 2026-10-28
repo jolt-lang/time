@@ -292,3 +292,25 @@
     (is (= "€\u00a01.234,50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "AT")) 1234.5)))
     (is (= "$1,234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "es" "MX")) 1234.5)))
     (is (= "CHF\u00a01’234.50" (.format (java.text.NumberFormat/getCurrencyInstance (java.util.Locale. "de" "CH")) 1234.5)))))
+
+;; Locale display names, in the default display locale (en) and in the bundled
+;; ones, as JDK 21 renders them; a display locale with no table reads its
+;; language's, then ROOT's (English).
+(deftest locale-display-names
+  (let [de-ch (java.util.Locale/forLanguageTag "de-CH") tw (java.util.Locale/forLanguageTag "zh-Hant-TW")
+        posix (java.util.Locale. "en" "US" "POSIX")]
+    (is (= "German (Germany)" (.getDisplayName java.util.Locale/GERMANY)))
+    (is (= "French" (.getDisplayLanguage java.util.Locale/FRANCE)))
+    (is (= "Japan" (.getDisplayCountry java.util.Locale/JAPAN)))
+    (is (= "Chinese (Traditional, Taiwan)" (.getDisplayName tw)))
+    (is (= "English (United States, Computer)" (.getDisplayName posix)))
+    (is (= "English (United States, POSIX)" (.getDisplayName posix java.util.Locale/ROOT)))
+    (is (= "allemand (Suisse)" (.getDisplayName de-ch java.util.Locale/FRENCH)))
+    (is (= "Deutsch (Schweiz)" (.getDisplayName de-ch (java.util.Locale. "de" "AT"))))
+    (is (= "中国語 (繁体字、台湾)" (.getDisplayName tw java.util.Locale/JAPANESE)))
+    (is (= "中文 (繁体，台湾)" (.getDisplayName tw java.util.Locale/CHINESE)))
+    (is (= "xx (QQ)" (.getDisplayName (java.util.Locale. "xx" "QQ"))))
+    (is (= "France" (.getDisplayName (java.util.Locale. "" "FR"))))
+    (is (= "" (.getDisplayName java.util.Locale/ROOT)))
+    (is (= "Traditional" (.getDisplayScript tw)))
+    (is (= "Computer" (.getDisplayVariant posix)))))

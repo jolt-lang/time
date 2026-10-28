@@ -7,6 +7,7 @@
             [jolt.host :as host]
             [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
             [jolt.time.locale-data :as ld]
+            [jolt.time.locale-names :as ln]
             [jolt.time.number-data :as nd]
             [jolt.time.util :as u]
             [jolt.time.local :as l]
@@ -259,13 +260,35 @@
   {:eq (fn [a b] (and (= (impl/field a :id) (impl/field b :id)) (= (lf a :variant) (lf b :variant))))
    :hash (fn [l] (hash [(impl/field l :id) (lf l :variant)]))
    :str locale-string :cmp nil :classes #{"java.util.Locale" "Locale"}})
+;; Display names, in a display locale (the default's, en, when none is given):
+;; each part's name from that locale's table, or the code itself when it has
+;; none, and getDisplayName the language followed by the script, country and
+;; variants in parentheses, joined the way that locale joins a list.
+(defn- display-in [args] (if (seq args) (impl/field (first args) :id) "en"))
+(defn- dn-part [names kind code] (if (empty? code) "" (get-in names [kind code] code)))
+(defn- dn-variants [names v]
+  (str/join (:separator names) (map #(dn-part names :variants %) (remove empty? (str/split v #"_")))))
+(defn- display-name [l in]
+  (let [names (ln/names in)
+        lang (dn-part names :languages (lf l :lang))
+        quals (remove empty? [(dn-part names :scripts (lf l :script))
+                              (dn-part names :countries (lf l :country))
+                              (dn-variants names (lf l :variant))])]
+    (cond (empty? quals) lang
+          (empty? lang) (str/join (:separator names) quals)
+          :else (str lang " (" (str/join (:separator names) quals) ")"))))
 (__register-class-methods! :jolt.time/locale
   {"toString" locale-string
    "toLanguageTag" locale-tag
    "getLanguage" (fn [l] (lf l :lang))
    "getScript" (fn [l] (lf l :script))
    "getCountry" (fn [l] (lf l :country))
-   "getVariant" (fn [l] (lf l :variant))})
+   "getVariant" (fn [l] (lf l :variant))
+   "getDisplayLanguage" (fn [l & in] (dn-part (ln/names (display-in in)) :languages (lf l :lang)))
+   "getDisplayCountry" (fn [l & in] (dn-part (ln/names (display-in in)) :countries (lf l :country)))
+   "getDisplayScript" (fn [l & in] (dn-part (ln/names (display-in in)) :scripts (lf l :script)))
+   "getDisplayVariant" (fn [l & in] (dn-variants (ln/names (display-in in)) (lf l :variant)))
+   "getDisplayName" (fn [l & in] (display-name l (display-in in)))})
 
 ;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
 ;; :date-names extension point and carries ROOT alone, because core has no locale
