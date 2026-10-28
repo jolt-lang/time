@@ -7,6 +7,7 @@
             [jolt.host :as host]
             [jolt.time.impl :as impl :refer [civil-from-days days-from-civil]]
             [jolt.time.locale-data :as ld]
+            [jolt.time.locale-names :as ln]
             [jolt.time.number-data :as nd]
             [jolt.time.util :as u]
             [jolt.time.local :as l]
@@ -248,6 +249,7 @@
    "KOREAN" (locale-of "ko") "KOREA" (locale-of "ko" "KR")
    "CHINESE" (locale-of "zh") "CHINA" (locale-of "zh" "CN")
    "SIMPLIFIED_CHINESE" (locale-of "zh" "CN") "TRADITIONAL_CHINESE" (locale-of "zh" "TW")
+   "PRC" (locale-of "zh" "CN") "TAIWAN" (locale-of "zh" "TW")
    "UK" (locale-of "en" "GB") "CANADA" (locale-of "en" "CA")
    "CANADA_FRENCH" (locale-of "fr" "CA") "ROOT" (locale-of "")})
 ;; (Locale. lang), (Locale. lang country), (Locale. lang country variant). The
@@ -259,13 +261,36 @@
   {:eq (fn [a b] (and (= (impl/field a :id) (impl/field b :id)) (= (lf a :variant) (lf b :variant))))
    :hash (fn [l] (hash [(impl/field l :id) (lf l :variant)]))
    :str locale-string :cmp nil :classes #{"java.util.Locale" "Locale"}})
+;; Display names, in a display locale (the default's, en, when none is given):
+;; each part's name from that locale's table, or the code itself when it has
+;; none, and getDisplayName the language followed by the script, country and
+;; variants in parentheses, joined the way that locale joins a list.
+(defn- display-in [args] (if (seq args) (impl/field (first args) :id) "en"))
+(defn- dn-part [names kind code] (if (empty? code) "" (get-in names [kind code] code)))
+(defn- dn-variants [names v]
+  (str/join (:separator names) (map #(dn-part names :variants %) (remove empty? (str/split v #"_")))))
+(defn- display-name [l in]
+  (let [names (ln/names in)
+        lang (dn-part names :languages (lf l :lang))
+        quals (remove empty? [(dn-part names :scripts (lf l :script))
+                              (dn-part names :countries (lf l :country))
+                              (dn-variants names (lf l :variant))])]
+    ;; with no language the first qualifier stands in front (und-Latn-US is
+    ;; "Latin (United States)")
+    (let [[head & more] (if (empty? lang) quals (cons lang quals))]
+      (if (seq more) (str head " (" (str/join (:separator names) more) ")") (or head "")))))
 (__register-class-methods! :jolt.time/locale
   {"toString" locale-string
    "toLanguageTag" locale-tag
    "getLanguage" (fn [l] (lf l :lang))
    "getScript" (fn [l] (lf l :script))
    "getCountry" (fn [l] (lf l :country))
-   "getVariant" (fn [l] (lf l :variant))})
+   "getVariant" (fn [l] (lf l :variant))
+   "getDisplayLanguage" (fn [l & in] (dn-part (ln/names (display-in in)) :languages (lf l :lang)))
+   "getDisplayCountry" (fn [l & in] (dn-part (ln/names (display-in in)) :countries (lf l :country)))
+   "getDisplayScript" (fn [l & in] (dn-part (ln/names (display-in in)) :scripts (lf l :script)))
+   "getDisplayVariant" (fn [l & in] (dn-variants (ln/names (display-in in)) (lf l :variant)))
+   "getDisplayName" (fn [l & in] (display-name l (display-in in)))})
 
 ;; jolt core's java.text.SimpleDateFormat renders MMM/MMMM/EEE/EEEE through a
 ;; :date-names extension point and carries ROOT alone, because core has no locale
