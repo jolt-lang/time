@@ -314,3 +314,18 @@
     (is (= "" (.getDisplayName java.util.Locale/ROOT)))
     (is (= "Traditional" (.getDisplayScript tw)))
     (is (= "Computer" (.getDisplayVariant posix)))))
+
+(deftest locale-display-names-regions
+  (let [de java.util.Locale/GERMANY tw (java.util.Locale/forLanguageTag "zh-Hant-TW")]
+    (is (= "德文 (德國)" (.getDisplayName de (java.util.Locale/forLanguageTag "zh-HK"))))
+    (is (= "德文 (德國)" (.getDisplayName de java.util.Locale/TAIWAN)))
+    (is (= "中文 (繁體字，台灣)" (.getDisplayName tw (java.util.Locale/forLanguageTag "zh-HK"))))
+    (is (= "德语 (德国)" (.getDisplayName de java.util.Locale/PRC)))
+    (is (= "chinois (idéogrammes han traditionnels, Taïwan)" (.getDisplayName tw (java.util.Locale. "fr" "CA"))))
+    (is (= "latín (Estados Unidos)" (.getDisplayName (java.util.Locale/forLanguageTag "und-Latn-US") (java.util.Locale. "es" "MX"))))
+    (is (= "Latin (United States)" (.getDisplayName (java.util.Locale/forLanguageTag "und-Latn-US"))))
+    (is (= "Mongolian (Mongolian)" (.getDisplayName (java.util.Locale/forLanguageTag "mn-Mong"))))
+    (is (= "Cantonese" (.getDisplayName (java.util.Locale/forLanguageTag "yue"))))
+    (is (= "Spanish (Latin America)" (.getDisplayName (java.util.Locale/forLanguageTag "es-419"))))
+    (is (= "world" (.getDisplayName (java.util.Locale. "" "001"))))
+    (is (= ["zh_TW" "zh_CN"] [(str java.util.Locale/TAIWAN) (str java.util.Locale/PRC)]))))

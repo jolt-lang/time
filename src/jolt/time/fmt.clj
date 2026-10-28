@@ -249,6 +249,7 @@
    "KOREAN" (locale-of "ko") "KOREA" (locale-of "ko" "KR")
    "CHINESE" (locale-of "zh") "CHINA" (locale-of "zh" "CN")
    "SIMPLIFIED_CHINESE" (locale-of "zh" "CN") "TRADITIONAL_CHINESE" (locale-of "zh" "TW")
+   "PRC" (locale-of "zh" "CN") "TAIWAN" (locale-of "zh" "TW")
    "UK" (locale-of "en" "GB") "CANADA" (locale-of "en" "CA")
    "CANADA_FRENCH" (locale-of "fr" "CA") "ROOT" (locale-of "")})
 ;; (Locale. lang), (Locale. lang country), (Locale. lang country variant). The
@@ -274,9 +275,10 @@
         quals (remove empty? [(dn-part names :scripts (lf l :script))
                               (dn-part names :countries (lf l :country))
                               (dn-variants names (lf l :variant))])]
-    (cond (empty? quals) lang
-          (empty? lang) (str/join (:separator names) quals)
-          :else (str lang " (" (str/join (:separator names) quals) ")"))))
+    ;; with no language the first qualifier stands in front (und-Latn-US is
+    ;; "Latin (United States)")
+    (let [[head & more] (if (empty? lang) quals (cons lang quals))]
+      (if (seq more) (str head " (" (str/join (:separator names) more) ")") (or head "")))))
 (__register-class-methods! :jolt.time/locale
   {"toString" locale-string
    "toLanguageTag" locale-tag

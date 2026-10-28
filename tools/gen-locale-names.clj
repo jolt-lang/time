@@ -6,11 +6,26 @@
 ;; Run it on the JDK the conformance oracle is pinned to (JDK 21).
 (import '[java.util Locale])
 (require '[clojure.string :as str])
-(def disp ["" "en" "de" "fr" "es" "it" "ja" "ko" "nl" "pt" "ru" "zh"])
-(def langs (sort (Locale/getISOLanguages)))
-(def countries (sort (Locale/getISOCountries)))
-(def scripts ["Arab" "Cyrl" "Deva" "Grek" "Hans" "Hant" "Hebr" "Jpan" "Kore" "Latn" "Thai"])
-(def variants ["POSIX"])
+;; the bundled display languages; zh-Hant is Taiwan's Traditional Chinese and
+;; zh-Hant-HK Hong Kong's (jolt.time.locale-names maps zh-TW / zh-HK / zh-MO onto
+;; them). Each country of these languages the JDK has a locale for whose names
+;; differ from its language's is a table of those differences (fr-CA, es-MX, …).
+(def base-disp ["" "en" "de" "fr" "es" "it" "ja" "ko" "nl" "pt" "ru" "zh" "zh-Hant" "zh-Hant-HK"])
+(def base-langs (set (remove #(or (= % "") (.contains ^String % "-")) base-disp)))
+;; every code the JDK has a locale for, not only the ISO lists
+(def av (Locale/getAvailableLocales))
+(def langs (sort (distinct (concat (Locale/getISOLanguages) (remove empty? (map #(.getLanguage %) av))))))
+(def countries (sort (distinct (concat (Locale/getISOCountries) (remove empty? (map #(.getCountry %) av))))))
+;; scripts: no API lists the codes the JDK can name, so ask it of every
+;; four-letter code and keep the ones it names in English
+(def scripts
+  (let [en (Locale/forLanguageTag "en") az (map char (range (int \a) (inc (int \z))))]
+    (sort (for [a az b az c az d az
+                :let [code (str (Character/toUpperCase (char a)) b c d)
+                      n (try (.getDisplayScript (.build (.setScript (java.util.Locale$Builder.) code)) en) (catch Exception _ ""))]
+                :when (and (seq n) (not= n code))]
+            code))))
+(def variants (sort (distinct (remove empty? (map #(.getVariant %) av)))))
 (defn names [dl f codes]
   (into (sorted-map) (keep (fn [c] (let [n (f c dl)] (when (and (seq n) (not= n c)) [c n]))) codes)))
 (defn tables [d]
@@ -31,13 +46,29 @@
         (concat (remove (fn [[k v]] (= v (get en k))) root)
                 (for [k (keys en) :when (not (contains? root k))] [k k]))))
 (def en (tables "en"))
+;; a country table: only what differs from its language's (a name the language
+;; has and the country does not is written as the code, as for ROOT)
+(defn parent-of [d] (subs d 0 (.lastIndexOf ^String d "-")))
+(def country-disp
+  (sort (distinct
+          (for [l (Locale/getAvailableLocales)
+                :let [lang (.getLanguage l) c (.getCountry l)]
+                :when (and (base-langs lang) (not= lang "zh") (re-matches #"[A-Z]{2}|[0-9]{3}" c)
+                           (empty? (.getScript l)) (empty? (.getVariant l)))]
+            (str lang "-" c)))))
+(def base-tables (into {} (for [d base-disp] [d (tables d)])))
 (def out
   (into (sorted-map)
-    (for [d disp :let [t (tables d)]]
-      [d (assoc (into {} (for [k [:languages :countries :scripts :variants]]
-                           [k (enc (if (= d "") (root-diff (get t k) (get en k)) (get t k)))]))
-                :separator (:separator t))])))
+    (concat
+      (for [d base-disp :let [t (base-tables d)]]
+        [d (assoc (into {} (for [k [:languages :countries :scripts :variants]]
+                             [k (enc (if (= d "") (root-diff (get t k) (get en k)) (get t k)))]))
+                  :separator (:separator t))])
+      (for [d country-disp :let [t (tables d) p (base-tables (parent-of d))
+                                 diffs (into {} (for [k [:languages :countries :scripts :variants]] [k (root-diff (get t k) (get p k))]))]
+            :when (or (some seq (vals diffs)) (not= (:separator t) (:separator p)))]
+        [d (assoc (into {} (for [[k v] diffs] [k (enc v)])) :separator (:separator t) :parent (parent-of d))]))))
 (let [p "src/jolt/time/locale_names.clj" s (slurp p)
       i (.indexOf s "(def ^:private raw\n") j (.indexOf s ")\n\n(defn- parse")]
   (spit p (str (subs s 0 (+ i (count "(def ^:private raw\n"))) (pr-str out) (subs s j)))
-  (println "wrote" (count disp) "display locales"))
+  (println "wrote" (count out) "display locales"))

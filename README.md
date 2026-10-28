@@ -40,6 +40,16 @@ zone (through `jolt.host/set-default-zone-provider!`), so `TimeZone/getDefault`,
 a zone-less `SimpleDateFormat` and `ZoneId/systemDefault` name one zone. Core on
 its own reads no system file for this and answers `TZ` or UTC.
 
+## Locales
+
+Locale data (month and day names, localized patterns, number and currency
+symbols, display names) is measured from JDK 21 and covers the bundled
+locales: ROOT, en, de, fr, es, it, ja, ko, nl, pt, ru and zh (Simplified, and
+Traditional for Taiwan and Hong Kong), with the countries of those languages.
+A locale outside them reads its language's data, then ROOT's. Unicode locale
+extensions (`-u-ca-japanese`, the `ja_JP_JP` and `th_TH_TH` compatibility
+locales) are not modelled.
+
 ## Test
 
 ```
