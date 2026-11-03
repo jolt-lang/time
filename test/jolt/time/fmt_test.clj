@@ -52,6 +52,87 @@
   (is (= "13:45:30" (.format DateTimeFormatter/ISO_LOCAL_TIME (LocalDateTime/of 2020 3 5 13 45 30))))
   (is (= "2020-03-05T13:45:30" (.format DateTimeFormatter/ISO_LOCAL_DATE_TIME (LocalDateTime/of 2020 3 5 13 45 30)))))
 
+;; A formatter's override zone (withZone): a value carrying an instant (Instant,
+;; ZonedDateTime, OffsetDateTime) is moved into that zone before its fields are
+;; read; ISO_INSTANT prints the instant itself either way. withZone used to be
+;; ignored, so an Instant printed as UTC with a "Z" zone. Values from the
+;; reference JVM, independent of the machine's zone.
+(def ^:private tor (java.time.ZoneId/of "America/Toronto"))
+(def ^:private kol (java.time.ZoneId/of "Asia/Kolkata"))
+(def ^:private i0 (java.time.Instant/ofEpochMilli 1143233340123))
+(def ^:private paris (java.time.ZonedDateTime/ofInstant i0 (java.time.ZoneId/of "Europe/Paris")))
+(def ^:private plus2 (java.time.OffsetDateTime/ofInstant i0 (java.time.ZoneOffset/ofHours 2)))
+
+(deftest with-zone-formats-in-the-override-zone
+  (let [fmt (fn [f z v] (.format (.withZone f z) v))]
+    (is (= "2006-03-24T15:49:00.123-05:00[America/Toronto]" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME tor i0)))
+    (is (= "2006-03-25T02:19:00.123+05:30[Asia/Kolkata]" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME kol i0)))
+    (is (= "2006-03-24T23:49:00.123+03:00" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME (java.time.ZoneOffset/ofHours 3) i0)))
+    (is (= "2006-03-24T20:49:00.123Z" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME java.time.ZoneOffset/UTC i0)))
+    (is (= "2006-03-24T15:49:00.123-05:00[America/Toronto]" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME tor paris)))
+    (is (= "2006-03-24T15:49:00.123-05:00[America/Toronto]" (fmt DateTimeFormatter/ISO_ZONED_DATE_TIME tor plus2)))
+    (is (= "2006-03-24T15:49:00.123-05:00" (fmt DateTimeFormatter/ISO_OFFSET_DATE_TIME tor i0)))
+    (is (= "2006-03-25T02:19:00.123" (fmt DateTimeFormatter/ISO_LOCAL_DATE_TIME kol i0)))
+    (is (= "2006-03-24T15:49:00.123" (fmt DateTimeFormatter/ISO_LOCAL_DATE_TIME tor paris)))
+    (is (= "2006-03-25T02:19:00.123+05:30[Asia/Kolkata]" (fmt DateTimeFormatter/ISO_DATE_TIME kol i0)))
+    (is (= "2006-03-25" (fmt DateTimeFormatter/ISO_LOCAL_DATE kol i0)))
+    (is (= "2006-03-25+05:30" (fmt DateTimeFormatter/ISO_DATE kol i0)))
+    (is (= "02:19:00.123" (fmt DateTimeFormatter/ISO_LOCAL_TIME kol i0)))
+    (is (= "02:19:00.123+05:30" (fmt DateTimeFormatter/ISO_TIME kol i0)))
+    (is (= "2006-03-25+05:30" (fmt DateTimeFormatter/ISO_OFFSET_DATE kol i0)))
+    (is (= "02:19:00.123+05:30" (fmt DateTimeFormatter/ISO_OFFSET_TIME kol i0)))
+    (is (= "Sat, 25 Mar 2006 02:19:00 +0530" (fmt DateTimeFormatter/RFC_1123_DATE_TIME kol i0)))
+    (is (= "Fri, 24 Mar 2006 20:49:00 GMT" (fmt DateTimeFormatter/RFC_1123_DATE_TIME java.time.ZoneOffset/UTC i0)))
+    ;; ISO_INSTANT prints the instant, whatever the zone
+    (is (= "2006-03-24T20:49:00.123Z" (fmt DateTimeFormatter/ISO_INSTANT tor i0)))
+    (is (= "2006-03-24T20:49:00.123Z" (fmt DateTimeFormatter/ISO_INSTANT tor paris)))
+    (is (= "2006-03-24T20:49:00.123Z" (.format DateTimeFormatter/ISO_INSTANT paris)))
+    ;; ofPattern
+    (is (= "2006-03-24 15:49:00.123 -05:00 America/Toronto"
+           (fmt (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss.SSS XXX VV") tor i0)))
+    (is (= "2006-03-24 23:49:00.123 +03:00 +03:00"
+           (fmt (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm:ss.SSS XXX VV") (java.time.ZoneOffset/ofHours 3) i0)))
+    (is (= "2006-03-24 15:49 EST" (fmt (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm z") tor i0)))
+    (is (= "2006-03-25 02:19 IST" (fmt (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm z") kol i0)))
+    (is (= "2006-03-24 21:49 CET" (.format (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm z") paris)))
+    ;; a value with no instant keeps its fields; the zone only answers zone letters
+    (is (= "2020-01-02T03:04:05" (fmt DateTimeFormatter/ISO_LOCAL_DATE_TIME tor (LocalDateTime/of 2020 1 2 3 4 5))))
+    (is (= "2020-01-02T03:04:05" (fmt DateTimeFormatter/ISO_DATE_TIME tor (LocalDateTime/of 2020 1 2 3 4 5))))
+    (is (= "2020-01-02 03:04 EST" (fmt (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm z") tor (LocalDateTime/of 2020 1 2 3 4 5))))
+    ;; withZone and withLocale keep each other
+    (is (= "mars" (fmt (DateTimeFormatter/ofPattern "MMMM" java.util.Locale/FRENCH) tor i0)))
+    (is (= "15:49" (.format (.withLocale (.withZone (DateTimeFormatter/ofPattern "HH:mm") tor) java.util.Locale/FRENCH) i0)))
+    (is (= tor (.getZone (.withZone DateTimeFormatter/ISO_LOCAL_DATE_TIME tor))))
+    (is (nil? (.getZone DateTimeFormatter/ISO_LOCAL_DATE_TIME)))))
+
+(deftest iso-optional-offset-and-zone
+  ;; ISO_DATE_TIME, ISO_DATE and ISO_TIME print the offset (and ISO_DATE_TIME
+  ;; the region) when the value has one
+  (is (= "2006-03-24T21:49:00.123+01:00[Europe/Paris]" (.format DateTimeFormatter/ISO_DATE_TIME paris)))
+  (is (= "2006-03-24T22:49:00.123+02:00" (.format DateTimeFormatter/ISO_DATE_TIME plus2)))
+  (is (= "2006-03-24+01:00" (.format DateTimeFormatter/ISO_DATE paris)))
+  (is (= "21:49:00.123+01:00" (.format DateTimeFormatter/ISO_TIME paris)))
+  (is (= "2020-01-02T03:04:05" (.format DateTimeFormatter/ISO_DATE_TIME (LocalDateTime/of 2020 1 2 3 4 5))))
+  (is (= "2006-03-24T22:49:00.123+02:00" (.format DateTimeFormatter/ISO_ZONED_DATE_TIME plus2)))
+  (is (= "Tue, 3 Jun 2008 11:05:30 GMT"
+         (.format DateTimeFormatter/RFC_1123_DATE_TIME (java.time.ZonedDateTime/of 2008 6 3 11 5 30 0 java.time.ZoneOffset/UTC)))))
+
+(deftest with-zone-parses-in-the-override-zone
+  (let [f (fn [z] (.withZone (DateTimeFormatter/ofPattern "yyyy-MM-dd HH:mm") z))]
+    (is (= "2020-01-02T03:04-05:00[America/Toronto]" (str (java.time.ZonedDateTime/parse "2020-01-02 03:04" (f tor)))))
+    (is (= "2020-01-02T03:04+05:30[Asia/Kolkata]" (str (java.time.ZonedDateTime/parse "2020-01-02 03:04" (f kol)))))
+    (is (= "2020-01-02T08:04:00Z" (str (java.time.Instant/from (.parse (f tor) "2020-01-02 03:04")))))
+    (is (= "2020-01-02T08:04:00Z"
+           (str (.parse (f tor) "2020-01-02 03:04"
+                        (reify java.time.temporal.TemporalQuery (queryFrom [_ t] (java.time.Instant/from t)))))))
+    (is (= "2020-01-01T21:04-05:00[America/Toronto]"
+           (str (java.time.ZonedDateTime/parse "2020-01-02T03:04:00+01:00" (.withZone DateTimeFormatter/ISO_OFFSET_DATE_TIME tor)))))
+    (is (= "2020-01-02T03:04" (str (LocalDateTime/parse "2020-01-02 03:04" (f tor)))))
+    (is (= "2020-01-02T03:04+03:00" (str (java.time.OffsetDateTime/parse "2020-01-02 03:04" (f (java.time.ZoneOffset/ofHours 3))))))
+    ;; the region in an ISO_ZONED_DATE_TIME string is kept
+    (is (= "2020-07-06T10:59:13.417+02:00[Europe/Paris]"
+           (str (java.time.ZonedDateTime/parse "2020-07-06T10:59:13.417+02:00[Europe/Paris]" DateTimeFormatter/ISO_ZONED_DATE_TIME))))))
+
 (deftest localized
   (is (= "Mar 5, 2020" (.format (DateTimeFormatter/ofLocalizedDate FormatStyle/MEDIUM) (LocalDate/of 2020 3 5))))
   (is (string? (.format (.withLocale (DateTimeFormatter/ofPattern "yyyy") (java.util.Locale. "en")) (LocalDate/of 2020 1 1)))))
