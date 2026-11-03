@@ -38,7 +38,7 @@ Fixed offsets (`Z`, `+05:30`) resolve purely in Clojure and never touch libc.
 `ZoneId/systemDefault` is the machine's zone (`TZ`, else the `/etc/localtime`
 link, else `/etc/timezone`). Loading the library also registers that lookup as
 jolt core's default zone provider, so `TimeZone/getDefault` and a zone-less
-`SimpleDateFormat` name the same zone. From jolt 0.8.24 core finds the machine's
+`SimpleDateFormat` name the same zone. With jolt after 0.8.23 (jolt-lang/jolt#1490) core finds the machine's
 zone itself and the provider only agrees with it; before that, core answered
 `TZ` or UTC until this library loaded.
 
