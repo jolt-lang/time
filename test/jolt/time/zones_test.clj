@@ -105,19 +105,33 @@
     ;; these were two separate hardcoded "Z" literals and could drift apart
     (is (= (ZoneId/systemDefault) (.getZone (Clock/systemDefaultZone))))))
 
+;; ZoneId/systemDefault is TimeZone.getDefault().toZoneId() on the JVM, so
+;; TimeZone/setDefault moves it, and every `now` with it. Skipped on a jolt
+;; without TimeZone/setDefault (before 0.8.24).
+(deftest system-default-follows-timezone-set-default
+  (when (try (TimeZone/setDefault (TimeZone/getTimeZone "Asia/Kolkata")) true
+             (catch Throwable _ false))
+    (try
+      (is (= (ZoneId/of "Asia/Kolkata") (ZoneId/systemDefault)))
+      (is (= (ZoneId/of "Asia/Kolkata") (.getZone (Clock/systemDefaultZone))))
+      (is (= (ZoneId/of "Asia/Kolkata") (.getZone (java.time.ZonedDateTime/now))))
+      (TimeZone/setDefault (TimeZone/getTimeZone "America/Toronto"))
+      (is (= (ZoneId/of "America/Toronto") (ZoneId/systemDefault)))
+      (finally (TimeZone/setDefault nil))))
+  ;; reset: back to the system's zone
+  (is (= (ZoneId/of (.getID (TimeZone/getDefault))) (ZoneId/systemDefault))))
+
 ;; --- core's default zone --------------------------------------------------------
-;; Core's own default zone (TimeZone/getDefault, a zone-less SimpleDateFormat) is
-;; TZ, else what a registered provider answers, else UTC. Loading this library
-;; registers system-zone-id as that provider. Pinned through with-redefs rather
-;; than by comparing the two answers on this machine: on a UTC box (CI) core
-;; answers UTC with or without a provider, and that would prove nothing. Core
-;; consults the provider only with TZ unset, so the check is skipped under TZ.
+;; Loading this library registers system-zone-id as core's default-zone
+;; provider. A jolt before 0.8.24 answers TZ, else that provider, else UTC; from
+;; 0.8.24 core reads the machine's zone itself and the provider is only its
+;; fallback where the system names none. Pinned through with-redefs, so on an
+;; older core TimeZone/getDefault is the provider's answer and on a newer one
+;; the machine's. Core consults neither under TZ, so the check is skipped there.
 (deftest core-default-zone-is-this-library's
   (when (nil? (System/getenv "TZ"))
-    (with-redefs [jolt.time.zones/system-zone-id (constantly "Asia/Tokyo")]
-      (is (= "Asia/Tokyo" (.getID (TimeZone/getDefault)))))
-    ;; "Z" is this library's spelling of UTC and not a TimeZone id
-    (with-redefs [jolt.time.zones/system-zone-id (constantly "Z")]
-      (is (= "UTC" (.getID (TimeZone/getDefault)))))
+    (let [machine (let [z (jolt.time.zones/system-zone-id)] (if (= z "Z") "UTC" z))]
+      (with-redefs [jolt.time.zones/system-zone-id (constantly "Asia/Tokyo")]
+        (is (contains? #{"Asia/Tokyo" machine} (.getID (TimeZone/getDefault))))))
     ;; and with the real lookup, the two entry points name one zone
     (is (= (ZoneId/systemDefault) (ZoneId/of (.getID (TimeZone/getDefault)))))))

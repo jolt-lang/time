@@ -175,7 +175,7 @@
   (cond
     (and (impl/jt? arg) (= :jolt.time/clock (impl/type-of arg))) (impl/field arg :zone)
     (some? arg) arg
-    :else (z/system-zone-id)))
+    :else (z/default-zone-id)))
 
 (defn- now-local-nanos
   "[local-nanos offset-seconds] for a Clock / zone designator / nil. clock-millis
@@ -374,7 +374,7 @@
    "getZone" (fn [c] (impl/field c :zone)) "toString" (fn [_] "Clock")})
 (statics! ["Clock" "java.time.Clock"]
   {"systemUTC" (fn [] (clock :system 0 (z/zone-id "Z" 0) nil))
-   "systemDefaultZone" (fn [] (clock :system 0 (z/zone-id-of (z/system-zone-id)) nil))
+   "systemDefaultZone" (fn [] (clock :system 0 (z/zone-id-of (z/default-zone-id)) nil))
    "system" (fn [zone] (clock :system 0 (z/zone-id-of zone) nil))
    "fixed" (fn [i zone] (clock :fixed (u/floor-div (inst/inst-nanos i) 1000000) (z/zone-id-of zone) nil))
    "offset" (fn [clk dur] (clock :offset (u/floor-div (a/dur-total-nanos dur) 1000000) (impl/field clk :zone) clk))
