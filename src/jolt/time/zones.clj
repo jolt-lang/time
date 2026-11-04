@@ -368,12 +368,31 @@
 (host/set-default-zone-provider!
   (fn [] (let [z (system-zone-id)] (if (= z "Z") "UTC" z))))
 
+;; The default zone, as java.time reads it: ZoneId/systemDefault is
+;; TimeZone.getDefault().toZoneId() on the JVM, so a TimeZone/setDefault moves
+;; it too. Core's TimeZone/getDefault answers that override, else TZ, else the
+;; provider registered above (system-zone-id itself, so this cannot recurse).
+;; An id this library cannot resolve (a POSIX rule string in TZ, which core
+;; passes through) falls back to its own lookup. A jolt that has no default
+;; of its own still answers TZ or the provider here, so nothing changes there.
+;; The last id checked and what it resolved to: the default changes rarely, and
+;; checking it against the id set is most of this call's cost.
+(def ^:private last-default (volatile! nil))
+(defn default-zone-id []
+  (let [id (try (.getID (java.util.TimeZone/getDefault)) (catch Exception _ nil))
+        [lid lz] @last-default]
+    (if (and id (= id lid))
+        lz
+        (let [z (as-zone-id id)]
+          (when z (vreset! last-default [id z]))
+          (or z (system-zone-id))))))
+
 (statics! ["ZoneId" "java.time.ZoneId"]
   {"of" (fn [id & _] (zone-id-of-strict id))
-   ;; zone-id-of, not the strict of: system-zone-id has already checked what it
-   ;; found against the id set, and a zone lookup on the way into a `now` is not
-   ;; a place to raise.
-   "systemDefault" (fn [] (zone-id-of (system-zone-id)))
+   ;; zone-id-of, not the strict of: default-zone-id has already checked what
+   ;; it found against the id set, and a zone lookup on the way into a `now` is
+   ;; not a place to raise.
+   "systemDefault" (fn [] (zone-id-of (default-zone-id)))
    "getAvailableZoneIds" (fn [] @available-zone-ids)
    "SHORT_IDS" short-ids})
 
