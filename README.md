@@ -35,10 +35,12 @@ host implements over libc. If that primitive is unavailable, those zones fall
 back to a built-in DST rule table covering the US, EU, AU, and NZ families.
 Fixed offsets (`Z`, `+05:30`) resolve purely in Clojure and never touch libc.
 
-Loading the library also registers the machine's zone as jolt core's default
-zone (through `jolt.host/set-default-zone-provider!`), so `TimeZone/getDefault`,
-a zone-less `SimpleDateFormat` and `ZoneId/systemDefault` name one zone. Core on
-its own reads no system file for this and answers `TZ` or UTC.
+`ZoneId/systemDefault` is the machine's zone (`TZ`, else the `/etc/localtime`
+link, else `/etc/timezone`). Loading the library also registers that lookup as
+jolt core's default zone provider, so `TimeZone/getDefault` and a zone-less
+`SimpleDateFormat` name the same zone. With jolt after 0.8.23 (jolt-lang/jolt#1490) core finds the machine's
+zone itself and the provider only agrees with it; before that, core answered
+`TZ` or UTC until this library loaded.
 
 ## Test
 
