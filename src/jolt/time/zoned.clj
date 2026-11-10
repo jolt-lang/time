@@ -492,3 +492,14 @@
                        (t/get-field (odt-ldt x) (e/cf-name f))))]
   (__register-class-methods! :jolt.time/zoned-date-time {"get" zget "getLong" zget})
   (__register-class-methods! :jolt.time/offset-date-time {"get" oget "getLong" oget}))
+
+;; OffsetTime as a TemporalAccessor: OFFSET_SECONDS is its own, every other field
+;; and unit answers as its LocalTime does (time-of-day fields and time units
+;; supported, date ones not), which is how the JDK defines it.
+(letfn [(offset-field? [f] (and (impl/jt? f) (= :jolt.time/chrono-field (impl/type-of f))
+                                (= "OFFSET_SECONDS" (e/cf-name f))))
+        (oget [x f] (if (offset-field? f) (ot-off x) (.getLong (l/local-time (ot-nod x)) f)))]
+  (__register-class-methods! :jolt.time/offset-time
+    {"isSupported" (fn [x a] (or (offset-field? a) (.isSupported (l/local-time (ot-nod x)) a)))
+     "get" (fn [x f] (if (offset-field? f) (ot-off x) (.get (l/local-time (ot-nod x)) f)))
+     "getLong" oget}))
