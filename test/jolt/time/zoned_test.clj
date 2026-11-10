@@ -138,3 +138,19 @@
                        #(.compareTo (OffsetDateTime/of 2020 1 1 0 0 0 0 utc) 1)
                        #(.compareTo (OffsetTime/of 10 0 0 0 utc) 1)
                        #(.compareTo (ZonedDateTime/of 2020 1 1 0 0 0 0 utc) (OffsetDateTime/of 2020 1 1 0 0 0 0 utc))])]))))
+
+;; OffsetTime is a TemporalAccessor: the time-of-day fields and OFFSET_SECONDS
+;; answer get/getLong/isSupported, date fields and units are unsupported.
+;; Values as on JDK 21.
+(deftest offset-time-temporal-accessor
+  (let [t (OffsetTime/of 10 30 15 0 (ZoneOffset/ofHours 2))]
+    (is (= [true true true false]
+           [(.isSupported t java.time.temporal.ChronoField/HOUR_OF_DAY)
+            (.isSupported t java.time.temporal.ChronoField/OFFSET_SECONDS)
+            (.isSupported t java.time.temporal.ChronoUnit/HOURS)
+            (.isSupported t java.time.temporal.ChronoField/MONTH_OF_YEAR)]))
+    (is (= false (.isSupported t java.time.temporal.ChronoUnit/DAYS)))
+    (is (= 30 (.get t java.time.temporal.ChronoField/MINUTE_OF_HOUR)))
+    (is (= 7200 (.get t java.time.temporal.ChronoField/OFFSET_SECONDS)))
+    (is (= 37815000000000 (.getLong t java.time.temporal.ChronoField/NANO_OF_DAY)))
+    (is (thrown? Exception (.get t java.time.temporal.ChronoField/MONTH_OF_YEAR)))))
