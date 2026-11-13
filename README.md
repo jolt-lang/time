@@ -7,7 +7,7 @@ The library provides the `java.time.*` surface (`Instant`, `LocalDate`,
 `ZonedDateTime`, `Duration`, `DateTimeFormatter`, …) as a pure-Clojure host
 shim, then pulls tick and cljc.java-time through `deps.edn` to expose tick's
 idiomatic Clojure API on top. Requiring it installs the shim and gives you the
-tick API. Needs jolt v0.8.2 or newer.
+tick API. Needs jolt v0.8.24 or newer.
 
 ## Use
 

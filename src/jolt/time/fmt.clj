@@ -438,15 +438,6 @@
 ;; has to run once.
 (defonce ^:private locale-points-registered (boolean (register-locale-points!)))
 
-;; jolt.host/register-enum! arrived in jolt v0.8.24; this library still loads on
-;; v0.8.2. The check runs at macroexpansion, not at load: a `resolve` that runs
-;; when the namespace loads is a var lookup by name, the one thing
-;; `jolt build --tree-shake` cannot follow, so every app that requires this
-;; namespace kept every def and the compiler image. Expanded, the form is a plain
-;; static call (or the statics fallback on an older jolt), with no lookup left.
-(defmacro ^:private if-register-enum [then else]
-  (if (resolve 'jolt.host/register-enum!) then else))
-
 ;; TextStyle: the six styles a text field renders in, in JDK declaration order,
 ;; declared through jolt.host/register-enum! as FormatStyle is below. Month,
 ;; DayOfWeek and ChronoField's getDisplayName take one (core java.time), and read
@@ -470,14 +461,11 @@
   {"isStandalone" (fn [s] (standalone? s))
    "asStandalone" (fn [s] (if (standalone? s) s (text-style (str (text-style-name s) "_STANDALONE"))))
    "asNormal" (fn [s] (if (standalone? s) (text-style (subs (text-style-name s) 0 (- (count (text-style-name s)) 11))) s))})
-(if-register-enum
-  (host/register-enum! "java.time.format.TextStyle" (mapv vector text-style-names text-styles))
-  (statics! ["TextStyle" "java.time.format.TextStyle"] (zipmap text-style-names text-styles)))
+(host/register-enum! "java.time.format.TextStyle" (mapv vector text-style-names text-styles))
 
 ;; FormatStyle is an enum: its constants in JDK declaration order, declared
 ;; through jolt.host/register-enum! (values, valueOf, ordinal, compareTo,
-;; EnumSet, the #object print form). An older jolt without register-enum!
-;; still gets the constants as plain statics.
+;; EnumSet, the #object print form).
 (def ^:private style-names ["FULL" "LONG" "MEDIUM" "SHORT"])
 (def ^:private style-key {"SHORT" :short "MEDIUM" :medium "LONG" :long "FULL" :full})
 (def ^:private style-ordinal (zipmap style-names (range)))
@@ -491,9 +479,7 @@
    :cmp (fn [a b] (- (style-ordinal (impl/field a :style)) (style-ordinal (impl/field b :style))))
    :classes #{"java.time.format.FormatStyle" "FormatStyle"
               "java.lang.Comparable" "Comparable" "java.lang.Enum" "Enum"}})
-(if-register-enum
-  (host/register-enum! "java.time.format.FormatStyle" (mapv vector style-names format-styles))
-  (statics! ["FormatStyle" "java.time.format.FormatStyle"] (zipmap style-names format-styles)))
+(host/register-enum! "java.time.format.FormatStyle" (mapv vector style-names format-styles))
 (defn- style-of [fs] (impl/field fs :style))
 ;; ofLocalized* defers pattern resolution: the pattern depends on the locale,
 ;; which .withLocale supplies after construction, so the value carries
