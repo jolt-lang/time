@@ -72,7 +72,7 @@
 (deftest zone-offsets-of-unslashed-and-prefixed-ids
   (doseq [[id jan jul] [["CET" 3600 7200] ["EST5EDT" -18000 -14400] ["NZ" 46800 43200]
                         ["Japan" 32400 32400] ["UTC+01:00" 3600 3600] ["GMT-05:30" -19800 -19800]
-                        ["UT+11" 39600 39600] ["GMT0" 0 0]]]
+                        ["UT+11" 39600 39600] ["GMT0" 0 0] ["US/Pacific" -28800 -25200]]]
     (is (= [jan jul] [(off-at id "2020-01-15T12:00:00Z") (off-at id "2020-07-15T12:00:00Z")]) id))
   (is (= ["UTC+01:00" "GMT-05:30" "UT+11:00" "GMT" "UTC"]
          (map #(.getId (ZoneId/of %)) ["UTC+01:00" "GMT-0530" "UT+11" "GMT+0" "UTC-00:00"])))

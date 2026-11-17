@@ -198,6 +198,8 @@
 (def ^:private available-zone-ids (delay (set zone-ids/ids)))
 ;; a tz region libc can answer for: CET, NZ and Japan have no slash
 (defn- region? [id] (or (slash? id) (contains? @available-zone-ids id)))
+;; the canonical zone a backward link (CET, NZ, US/Pacific) names, for libc
+(defn- tz-name [id] (get zone-ids/links id id))
 ;; UTC+01:00, GMT-5, UT+11 -> [normalized id, offset]. JDK ids drop a zero offset.
 (defn- prefixed-offset [id]
   (when-let [[_ pfx sfx] (re-matches #"(UTC|GMT|UT)([+-].+)" id)]
@@ -207,7 +209,7 @@
 (defn zone-offset-at-instant [id std secs]
   (cond
     (fixed-offset-zone? id) (parse-zone-offset id)
-    (region? id) (let [libc (host/tz-offset-seconds id secs)]
+    (region? id) (let [libc (host/tz-offset-seconds (tz-name id) secs)]
                   (if (some? libc) libc
                     (if-let [[std2 rule] (dst-zone-table id)]
                       (dst-offset std2 rule secs)
@@ -235,7 +237,7 @@
               (fixed-offset-zone? id) (let [s (parse-zone-offset id)] [(zo-id s) s])
               (prefixed-offset id) (prefixed-offset id)
               :else (let [rid (get short-ids id id)]
-                      (if (region? rid) [rid (or (host/tz-offset-seconds rid 0) (get zone-offset-table rid 0))]
+                      (if (region? rid) [rid (or (host/tz-offset-seconds (tz-name rid) 0) (get zone-offset-table rid 0))]
                           [id 0]))))))
 (defn zone-id-of [z] (let [[id off] (resolve-zone z)] (zone-id id off)))
 
