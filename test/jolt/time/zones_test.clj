@@ -48,6 +48,24 @@
   (is (= "Europe/Paris" (.getId (ZoneId/of "Europe/Paris"))))
   (is (= (ZoneId/of "America/New_York") (ZoneId/of "America/New_York"))))
 
+;; A region id the tz database doesn't know throws ZoneRulesException, a
+;; DateTimeException, as on the JVM. It used to come back as a zone with UTC rules.
+(deftest zone-id-of-rejects-unknown-regions
+  (doseq [id ["Nope/Zone" "garbage" "Nope" "australia/sydney" "PST" "system"]]
+    (is (= ["java.time.zone.ZoneRulesException" (str "Unknown time-zone ID: " id)]
+           (try (ZoneId/of id) nil
+                (catch Throwable e [(.getName (class e)) (ex-message e)])))
+        id))
+  (is (= :dte (try (ZoneId/of "Nope/Zone") :no-throw (catch java.time.DateTimeException _ :dte))))
+  (doseq [id ["Australia/Sydney" "UTC" "GMT" "UT" "Etc/UTC" "Z" "+11:00" "UTC+11" "GMT+1100"
+              "US/Pacific" "Asia/Calcutta" "Europe/Kyiv" "Etc/GMT+5" "America/Argentina/Buenos_Aires"]]
+    (is (some? (ZoneId/of id)) id))
+  ;; the two-arg form expands through the alias map first
+  (is (= "America/Los_Angeles" (.getId (ZoneId/of "PST" ZoneId/SHORT_IDS))))
+  (is (= "Australia/Sydney" (.getId (ZoneId/of "Australia/Sydney" ZoneId/SHORT_IDS))))
+  (is (= "java.time.zone.ZoneRulesException"
+         (try (ZoneId/of "Nope/Zone" ZoneId/SHORT_IDS) nil (catch Throwable e (.getName (class e)))))))
+
 (deftest dst-offsets
   ;; America/New_York: EST (-5) in January, EDT (-4) in July
   (is (= -18000 (off-at "America/New_York" "2020-01-15T12:00:00Z")))

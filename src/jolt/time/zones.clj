@@ -243,10 +243,10 @@
 
 ;; ZoneId/of validates the ID shape like the JVM — one-char ids other than Z,
 ;; an invalid offset form, or a region with an illegal character (malli probes
-;; "UTC'") throw DateTimeException. A syntax-valid region is accepted without a
-;; tzdb existence check (offset resolution stays best-effort), which is the one
-;; deliberate divergence here.
+;; "UTC'") throw DateTimeException. A region missing from the tz database
+;; throws ZoneRulesException.
 (def ^:private region-id-re #"[A-Za-z][A-Za-z0-9~/._+-]*")
+(def ^:private available-zone-ids (delay (set zone-ids/ids)))
 (defn- zone-id-of-strict [z]
   (if (and (impl/jt? z) (or (zo? z) (zid? z)))
     (zone-id-of z)
@@ -261,11 +261,12 @@
         :else (if-let [[_ pfx suffix] (re-matches #"(UTC|GMT|UT)([+-].+)?" id)]
                 (do (when suffix (zone-offset-of-strict suffix))
                     (zone-id-of id))
-                (if (re-matches region-id-re id)
-                  (zone-id-of id)
-                  (bad!)))))))
-
-(def ^:private available-zone-ids (delay (set zone-ids/ids)))
+                (cond
+                  (not (re-matches region-id-re id)) (bad!)
+                  (contains? @available-zone-ids id) (zone-id-of id)
+                  :else (throw (jolt.host/throwable
+                                "java.time.zone.ZoneRulesException"
+                                (str "Unknown time-zone ID: " id)))))))))
 
 ;; --- the machine's own zone ---------------------------------------------------
 ;; systemDefault used to answer "Z" unconditionally, which is less "UTC is the
@@ -388,7 +389,8 @@
           (or z (system-zone-id))))))
 
 (statics! ["ZoneId" "java.time.ZoneId"]
-  {"of" (fn [id & _] (zone-id-of-strict id))
+  {"of" (fn ([id] (zone-id-of-strict id))
+            ([id aliases] (zone-id-of-strict (get aliases id id))))
    ;; zone-id-of, not the strict of: default-zone-id has already checked what
    ;; it found against the id set, and a zone lookup on the way into a `now` is
    ;; not a place to raise.
