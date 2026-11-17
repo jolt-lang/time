@@ -195,11 +195,21 @@
 
 (defn- fixed-offset-zone? [id] (and (pos? (count id)) (#{\+ \-} (nth id 0))))
 (defn- slash? [id] (boolean (some #(= \/ %) id)))
+(def ^:private available-zone-ids (delay (set zone-ids/ids)))
+;; a tz region libc can answer for: CET, NZ and Japan have no slash
+(defn- region? [id] (or (slash? id) (contains? @available-zone-ids id)))
+;; the canonical zone a backward link (CET, NZ, US/Pacific) names, for libc
+(defn- tz-name [id] (get zone-ids/links id id))
+;; UTC+01:00, GMT-5, UT+11 -> [normalized id, offset]. JDK ids drop a zero offset.
+(defn- prefixed-offset [id]
+  (when-let [[_ pfx sfx] (re-matches #"(UTC|GMT|UT)([+-].+)" id)]
+    (let [secs (parse-zone-offset sfx)]
+      [(if (zero? secs) pfx (str pfx (zo-id secs))) secs])))
 
 (defn zone-offset-at-instant [id std secs]
   (cond
     (fixed-offset-zone? id) (parse-zone-offset id)
-    (slash? id) (let [libc (host/tz-offset-seconds id secs)]
+    (region? id) (let [libc (host/tz-offset-seconds (tz-name id) secs)]
                   (if (some? libc) libc
                     (if-let [[std2 rule] (dst-zone-table id)]
                       (dst-offset std2 rule secs)
@@ -222,10 +232,12 @@
     (and (impl/jt? z) (zid? z)) [(zid-id z) (zid-off z)]
     :else (let [id (str z)]
             (cond
-              (contains? #{"Z" "UTC" "GMT" "Etc/UTC" "Etc/GMT" "system"} id) ["Z" 0]
+              (contains? #{"Z" "system"} id) ["Z" 0]
+              (contains? #{"UTC" "GMT" "UT" "Etc/UTC" "Etc/GMT"} id) [id 0]
               (fixed-offset-zone? id) (let [s (parse-zone-offset id)] [(zo-id s) s])
+              (prefixed-offset id) (prefixed-offset id)
               :else (let [rid (get short-ids id id)]
-                      (if (slash? rid) [rid (or (host/tz-offset-seconds rid 0) (get zone-offset-table rid 0))]
+                      (if (region? rid) [rid (or (host/tz-offset-seconds (tz-name rid) 0) (get zone-offset-table rid 0))]
                           [id 0]))))))
 (defn zone-id-of [z] (let [[id off] (resolve-zone z)] (zone-id id off)))
 
@@ -246,8 +258,7 @@
 ;; "UTC'") throw DateTimeException. A region missing from the tz database
 ;; throws ZoneRulesException.
 (def ^:private region-id-re #"[A-Za-z][A-Za-z0-9~/._+-]*")
-(def ^:private available-zone-ids (delay (set zone-ids/ids)))
-(defn- zone-id-of-strict [z]
+(defn zone-id-of-strict [z]
   (if (and (impl/jt? z) (or (zo? z) (zid? z)))
     (zone-id-of z)
     (let [id (str z)
