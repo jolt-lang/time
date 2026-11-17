@@ -202,6 +202,29 @@
 (defn odt [ed nod off] (impl/value :jolt.time/offset-date-time {:ed ed :nod nod :off off}))
 (defn- odt-ed [x] (impl/field x :ed)) (defn- odt-nod [x] (impl/field x :nod)) (defn- odt-off [x] (impl/field x :off))
 (defn odt? [x] (= :jolt.time/offset-date-time (impl/type-of x)))
+
+;; ISO_OFFSET_DATE_TIME. The JDK rejects +hhmm because it stops after +hh. Out
+;; of range fields throw here, since the date and time helpers roll them over.
+(def ^:private iso-offset-dt-re
+  #"((\d{4}|-\d{4,9}|\+\d{5,9})-(\d{2})-(\d{2}))[Tt]((\d{2}):(\d{2})(?::(\d{2})(?:\.\d{0,9})?)?)([Zz]|[+-]\d{2}(?::[0-5]\d(?::[0-5]\d)?)?)")
+(defn- month-length [y m]
+  (case (int m)
+    2 (if (and (zero? (mod y 4)) (or (pos? (mod y 100)) (zero? (mod y 400)))) 29 28)
+    (4 6 9 11) 30
+    31))
+(defn parse-offset-dt-iso [s]
+  (let [s (str s)
+        bad! (fn [why] (throw (jolt.host/throwable "java.time.format.DateTimeParseException"
+                                                   (str "Text '" s "' could not be parsed" why))))
+        [_ date y mo d time h mi sec off-text] (or (re-matches iso-offset-dt-re s) (bad! ""))
+        [y mo d h mi] (map parse-long [y mo d h mi])
+        sec (if sec (parse-long sec) 0)
+        off (z/parse-zone-offset (if (#{"Z" "z"} off-text) "Z" off-text))]
+    (when-not (and (<= 1 mo 12) (<= 1 d (month-length y mo)) (< h 24) (< mi 60) (< sec 60))
+      (bad! ": field value out of range"))
+    (when (> (abs off) (* 18 3600))
+      (bad! ": Zone offset not in valid range: -18:00 to +18:00"))
+    (odt (l/parse-iso-date date) (u/parse-hms->nano time) off)))
 (defn- odt-ldt [x] (l/local-dt (odt-ed x) (odt-nod x)))
 (defn- odt->nanos [x] (- (+ (* (odt-ed x) npd) (odt-nod x)) (* (odt-off x) nps)))
 (defn- orewrap [x ldt] (odt (l/ldt-epoch-day ldt) (l/ldt-nod ldt) (odt-off x)))
@@ -256,11 +279,7 @@
                               (odt (u/floor-div local npd) (u/floor-mod local npd) off)))
    "MIN" (odt (days-from-civil -999999999 1 1) 0 (* 18 3600))
    "MAX" (odt (days-from-civil 999999999 12 31) (dec npd) (* -18 3600))
-   "parse" (fn [s & _] (let [nanos (inst/parse-iso-instant (str s))
-                             op (some (fn [i] (when (#{\Z \z \+ \-} (nth (str s) i)) i)) (range (inc (.indexOf (str s) "T")) (count (str s))))
-                             off (z/parse-zone-offset (if op (subs (str s) op) "Z"))
-                             local (+ nanos (* off nps))]
-                         (odt (u/floor-div local npd) (u/floor-mod local npd) off)))})
+   "parse" (fn [s & _] (parse-offset-dt-iso s))})
 
 ;; --- OffsetTime --------------------------------------------------------------
 (defn ot [nod off] (impl/value :jolt.time/offset-time {:nod nod :off off}))
