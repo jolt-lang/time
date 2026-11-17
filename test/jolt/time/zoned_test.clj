@@ -58,6 +58,26 @@
              "12026-11-16T10:12:33Z" "+2026-11-16T10:12:33Z" "02026-11-16T10:12:33Z"]]
     (is (= "java.time.format.DateTimeParseException" (ex-class-name #(OffsetDateTime/parse s))) s)))
 
+;; ZonedDateTime/parse with one argument is ISO_ZONED_DATE_TIME: an
+;; ISO_OFFSET_DATE_TIME, then an optional [zone]. The offset is required, the
+;; zone must exist, and the instant is read in the zone (or at the offset when
+;; there is none). Expected values are the JDK's.
+(deftest zoned-date-time-parse-iso-shape
+  (doseq [[s expected] [["2020-01-01T00:00+01:00" "2020-01-01T00:00+01:00"]
+                        ["2020-01-01T00:00Z" "2020-01-01T00:00Z"]
+                        ["2020-01-01T00:00:00.5-05:30" "2020-01-01T00:00:00.500-05:30"]
+                        ["2020-01-15T10:30:00+02:00[Europe/Paris]" "2020-01-15T09:30+01:00[Europe/Paris]"]
+                        ["2020-07-15T10:30:00+02:00[Europe/Paris]" "2020-07-15T10:30+02:00[Europe/Paris]"]
+                        ["2020-01-01T00:00Z[UTC]" "2020-01-01T00:00Z[UTC]"]
+                        ["2020-01-01T00:00+01:00[UTC+01:00]" "2020-01-01T00:00+01:00[UTC+01:00]"]
+                        ["2020-01-01T00:00+01:00[+01:00]" "2020-01-01T00:00+01:00"]]]
+    (is (= expected (str (ZonedDateTime/parse s))) s))
+  (doseq [s ["2020-01-01T00:00Z[Nope/Zone]" "2020-01-01T00:00[Europe/Paris]" "2020-01-01T00:00"
+             "2020-01-01T00:00+0100" "2020-01-01" "garbage" "" "2020-01-01T00:00Z[Europe/Paris"
+             "2020-01-01T00:00Z[]" "2020-01-01T00:00Z[EST]" "2020-01-01T00:00Z[Europe/Paris]x"
+             "2020-02-30T00:00Z[UTC]"]]
+    (is (= "java.time.format.DateTimeParseException" (ex-class-name #(ZonedDateTime/parse s))) s)))
+
 (deftest instant-atzone
   (let [i (Instant/parse "2020-07-06T10:59:13Z")]
     (is (= 1594033153 (.toEpochSecond (.atZone i (ZoneId/of "Europe/Paris")))))

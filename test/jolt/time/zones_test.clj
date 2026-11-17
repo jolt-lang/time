@@ -66,6 +66,19 @@
   (is (= "java.time.zone.ZoneRulesException"
          (try (ZoneId/of "Nope/Zone" ZoneId/SHORT_IDS) nil (catch Throwable e (.getName (class e)))))))
 
+;; A region id with no slash is still a tz region (CET, NZ, Japan), and a
+;; UTC/GMT/UT prefix with an offset is fixed at that offset. Both used to read
+;; as UTC. Expected values are the JDK's.
+(deftest zone-offsets-of-unslashed-and-prefixed-ids
+  (doseq [[id jan jul] [["CET" 3600 7200] ["EST5EDT" -18000 -14400] ["NZ" 46800 43200]
+                        ["Japan" 32400 32400] ["UTC+01:00" 3600 3600] ["GMT-05:30" -19800 -19800]
+                        ["UT+11" 39600 39600] ["GMT0" 0 0]]]
+    (is (= [jan jul] [(off-at id "2020-01-15T12:00:00Z") (off-at id "2020-07-15T12:00:00Z")]) id))
+  (is (= ["UTC+01:00" "GMT-05:30" "UT+11:00" "GMT" "UTC"]
+         (map #(.getId (ZoneId/of %)) ["UTC+01:00" "GMT-0530" "UT+11" "GMT+0" "UTC-00:00"])))
+  (is (= "2020-07-01T02:00+02:00[CET]"
+         (str (java.time.ZonedDateTime/ofInstant (Instant/parse "2020-07-01T00:00:00Z") (ZoneId/of "CET"))))))
+
 (deftest dst-offsets
   ;; America/New_York: EST (-5) in January, EDT (-4) in July
   (is (= -18000 (off-at "America/New_York" "2020-01-15T12:00:00Z")))

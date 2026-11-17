@@ -72,17 +72,23 @@
     (str (l/iso-datetime-str (zdt-ed x) (zdt-nod x)) suf
          (if (or (= id suf) (and (pos? (count id)) (#{\+ \- \Z} (nth id 0)))) "" (str "[" id "]")))))
 
+(declare parse-offset-dt-iso odt->nanos)
 (defn parse-zoned [s]
-  ;; "<local>[±HH:mm | Z][zone]" — a [zone] with no explicit offset means the
-  ;; local part is wall time in that zone; otherwise it's an instant + zone.
-  (let [zb (.indexOf s "[")
-        zone (when (>= zb 0) (subs s (inc zb) (dec (count s))))
-        body (if (>= zb 0) (subs s 0 zb) s)
-        ti (.indexOf body "T")
-        has-off (some (fn [i] (#{\Z \z \+ \-} (nth body i))) (range (inc ti) (count body)))]
-    (if (and zone (not has-off))
-      (zoned-of-ldt (l/local-dt (l/parse-iso-date (subs body 0 ti)) (u/parse-hms->nano (subs body (inc ti)))) zone)
-      (zoned-of-instant (inst/parse-iso-instant body) (or zone "Z")))))
+  ;; ISO_ZONED_DATE_TIME: an ISO_OFFSET_DATE_TIME, then an optional [zone]. The
+  ;; offset fixes the instant, which is read in the zone, or at the offset when
+  ;; no zone is named. The zone must exist.
+  (let [s (str s)
+        bad! (fn [why] (throw (jolt.host/throwable "java.time.format.DateTimeParseException"
+                                                   (str "Text '" s "' could not be parsed" why))))
+        zb (.indexOf s "[")
+        body (if (neg? zb) s (subs s 0 zb))
+        zone (when-not (neg? zb)
+               (when-not (= \] (nth s (dec (count s)))) (bad! ""))
+               (let [id (subs s (inc zb) (dec (count s)))]
+                 (try (z/zone-id-of-strict id)
+                      (catch Throwable e (bad! (str ": " (ex-message e)))))))
+        o (parse-offset-dt-iso body s)]
+    (zoned-of-instant (odt->nanos o) (or zone (z/zo-id (impl/field o :off))))))
 
 ;; ChronoZonedDateTime.compareTo: the instant, then the local date-time, then
 ;; the zone id
@@ -212,10 +218,13 @@
     2 (if (and (zero? (mod y 4)) (or (pos? (mod y 100)) (zero? (mod y 400)))) 29 28)
     (4 6 9 11) 30
     31))
-(defn parse-offset-dt-iso [s]
+(defn parse-offset-dt-iso
+  ([s] (parse-offset-dt-iso s s))
+  ;; text is the whole input, for the message, when s is part of it
+  ([s text]
   (let [s (str s)
         bad! (fn [why] (throw (jolt.host/throwable "java.time.format.DateTimeParseException"
-                                                   (str "Text '" s "' could not be parsed" why))))
+                                                   (str "Text '" text "' could not be parsed" why))))
         [_ date y mo d time h mi sec off-text] (or (re-matches iso-offset-dt-re s) (bad! ""))
         [y mo d h mi] (map parse-long [y mo d h mi])
         sec (if sec (parse-long sec) 0)
@@ -224,7 +233,7 @@
       (bad! ": field value out of range"))
     (when (> (abs off) (* 18 3600))
       (bad! ": Zone offset not in valid range: -18:00 to +18:00"))
-    (odt (l/parse-iso-date date) (u/parse-hms->nano time) off)))
+    (odt (l/parse-iso-date date) (u/parse-hms->nano time) off))))
 (defn- odt-ldt [x] (l/local-dt (odt-ed x) (odt-nod x)))
 (defn- odt->nanos [x] (- (+ (* (odt-ed x) npd) (odt-nod x)) (* (odt-off x) nps)))
 (defn- orewrap [x ldt] (odt (l/ldt-epoch-day ldt) (l/ldt-nod ldt) (odt-off x)))
