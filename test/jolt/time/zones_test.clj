@@ -79,6 +79,32 @@
   (is (= "2020-07-01T02:00+02:00[CET]"
          (str (java.time.ZonedDateTime/ofInstant (Instant/parse "2020-07-01T00:00:00Z") (ZoneId/of "CET"))))))
 
+;; An offset id gives a ZoneOffset, as on the JVM, so (instance? ZoneOffset z)
+;; tells a fixed offset from a named zone. A zone whose rules are fixed
+;; normalizes to its ZoneOffset; one with transitions stays itself.
+(deftest zone-id-of-offset-ids-are-zone-offsets
+  (doseq [[id oid] [["+10:00" "+10:00"] ["Z" "Z"] ["-03:30" "-03:30"] ["+10" "+10:00"]]]
+    (let [z (ZoneId/of id)]
+      (is (instance? ZoneOffset z) id)
+      (is (instance? ZoneId z) id)
+      (is (= oid (.getId z)) id)
+      (is (= (ZoneOffset/of id) z) id)))
+  (doseq [id ["UTC+10" "Australia/Sydney" "UTC" "CET"]]
+    (is (not (instance? ZoneOffset (ZoneId/of id))) id))
+  (doseq [[id oid] [["+10:00" "+10:00"] ["Z" "Z"] ["UTC+10" "+10:00"] ["GMT-05:30" "-05:30"]
+                    ["UT+11" "+11:00"] ["UTC" "Z"] ["GMT" "Z"] ["Etc/UTC" "Z"] ["GMT0" "Z"]
+                    ["Etc/GMT+5" "-05:00"]]]
+    (let [n (.normalized (ZoneId/of id))]
+      (is (instance? ZoneOffset n) id)
+      (is (= oid (.getId n)) id)))
+  (doseq [id ["Australia/Sydney" "CET" "NZ" "US/Pacific"]]
+    (is (= id (.getId (.normalized (ZoneId/of id)))) id))
+  (doseq [[id fixed?] [["UTC+10" true] ["UTC" true] ["Etc/GMT+5" true] ["+02:00" true]
+                       ["CET" false] ["NZ" false] ["Australia/Sydney" false]]]
+    (is (= fixed? (.isFixedOffset (.getRules (ZoneId/of id)))) id))
+  (is (= "2020-01-01T00:00+10:00"
+         (str (java.time.ZonedDateTime/ofInstant (Instant/parse "2019-12-31T14:00:00Z") (ZoneId/of "+10:00"))))))
+
 (deftest dst-offsets
   ;; America/New_York: EST (-5) in January, EDT (-4) in July
   (is (= -18000 (off-at "America/New_York" "2020-01-15T12:00:00Z")))
