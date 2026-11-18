@@ -206,6 +206,14 @@
     (let [secs (parse-zone-offset sfx)]
       [(if (zero? secs) pfx (str pfx (zo-id secs))) secs])))
 
+;; ZoneRules.isFixedOffset: an offset id, a UTC/GMT/UT id with or without an
+;; offset, or a tz zone in Etc/ (directly or through a backward link like GMT0)
+(defn- fixed-zone-id? [id]
+  (boolean
+   (or (= id "Z") (fixed-offset-zone? id)
+       (re-matches #"(UTC|GMT|UT)([+-].+)?" id)
+       (str/starts-with? (tz-name id) "Etc/"))))
+
 (defn zone-offset-at-instant [id std secs]
   (cond
     (fixed-offset-zone? id) (parse-zone-offset id)
@@ -248,7 +256,7 @@
 (__register-class-methods! :jolt.time/zone-id
   {"getId" zid-id
    "getRules" (fn [z] (zone-rules (zid-id z) (zid-off z)))
-   "normalized" (fn [z] (if (and (pos? (count (zid-id z))) (#{\+ \- \Z} (nth (zid-id z) 0))) (zone-offset (zid-off z)) z))
+   "normalized" (fn [z] (if (fixed-zone-id? (zid-id z)) (zone-offset (zid-off z)) z))
    "getDisplayName" (fn [z & _] (zid-id z))
    "equals" (fn [z o] (boolean (and (impl/jt? o) (zid? o) (= (zid-id z) (zid-id o)))))
    "hashCode" (fn [z] (hash (zid-id z))) "toString" zid-id})
@@ -266,9 +274,10 @@
                               "java.time.DateTimeException"
                               (str "Invalid ID for ZoneId, invalid format: " id))))]
       (cond
-        (= id "Z") (zone-id-of id)
+        ;; an offset id is a ZoneOffset, as the JDK's ZoneId.of answers
+        (= id "Z") (zone-offset-of-strict id)
         (= 1 (count id)) (bad!)
-        (#{\+ \-} (nth id 0)) (do (zone-offset-of-strict id) (zone-id-of id))
+        (#{\+ \-} (nth id 0)) (zone-offset-of-strict id)
         :else (if-let [[_ pfx suffix] (re-matches #"(UTC|GMT|UT)([+-].+)?" id)]
                 (do (when suffix (zone-offset-of-strict suffix))
                     (zone-id-of id))
@@ -429,5 +438,5 @@
                        (zone-offset (zone-offset-at-local (zr-id r) (zr-std r)
                                      (+ (* (l/ldt-epoch-day a) 86400) (u/floor-div (l/ldt-nod a) nps))))
                        :else (zone-offset (zr-std r))))))
-   "isFixedOffset" (fn [r] (not (slash? (zr-id r))))
+   "isFixedOffset" (fn [r] (fixed-zone-id? (zr-id r)))
    "toString" (fn [r] (str "ZoneRules[" (zr-id r) "]"))})
