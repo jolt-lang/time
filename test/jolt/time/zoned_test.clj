@@ -150,6 +150,25 @@
     (doseq [z [ZoneOffset/UTC (ZoneOffset/ofHours -7) (ZoneId/of "Europe/Paris")]]
       (is (= (.toLocalDateTime (.atZone i z)) (LocalDateTime/ofInstant i z))))))
 
+;; LocalDate/ofInstant and LocalTime/ofInstant: the date and the time of the
+;; same wall time. Values certified against JDK 25.
+(deftest local-date-and-time-of-instant
+  (let [i (Instant/parse "2026-09-29T23:34:56.123456789Z")
+        neg (Instant/parse "1969-12-31T23:59:59.5Z")]
+    (is (= "2026-09-29" (str (LocalDate/ofInstant i ZoneOffset/UTC))))
+    (is (= "23:34:56.123456789" (str (LocalTime/ofInstant i ZoneOffset/UTC))))
+    ;; an offset that moves the date forward, a zone that keeps it
+    (is (= "2026-09-30" (str (LocalDate/ofInstant i (ZoneOffset/ofHours 2)))))
+    (is (= "01:34:56.123456789" (str (LocalTime/ofInstant i (ZoneOffset/ofHours 2)))))
+    (is (= "2026-09-29" (str (LocalDate/ofInstant i (ZoneId/of "America/New_York")))))
+    (is (= "19:34:56.123456789" (str (LocalTime/ofInstant i (ZoneId/of "America/New_York")))))
+    ;; an instant before the epoch
+    (is (= "1969-12-31" (str (LocalDate/ofInstant neg ZoneOffset/UTC))))
+    (is (= "23:59:59.500" (str (LocalTime/ofInstant neg ZoneOffset/UTC))))
+    (doseq [z [ZoneOffset/UTC (ZoneOffset/ofHours -7) (ZoneId/of "Asia/Kolkata")]]
+      (is (= (.toLocalDate (.atZone i z)) (LocalDate/ofInstant i z)))
+      (is (= (.toLocalTime (.atZone i z)) (LocalTime/ofInstant i z))))))
+
 (deftest local-date-time-of-epoch-second
   (is (= "2026-09-29T14:34:56" (str (LocalDateTime/ofEpochSecond 1790685296 0 (ZoneOffset/ofHours 2)))))
   (is (= "2026-09-29T12:34:56" (str (LocalDateTime/ofEpochSecond 1790685296 0 ZoneOffset/UTC))))

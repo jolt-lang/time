@@ -441,6 +441,13 @@
   {"ofInstant" (fn [i zone] (zdt-ldt (zoned-of-instant (inst/inst-nanos i) zone)))
    "ofEpochSecond" ldt-of-epoch-second})
 
+;; LocalDate/ofInstant and LocalTime/ofInstant (JDK 9) are the date and the time
+;; of the same wall time.
+(statics! ["LocalDate" "java.time.LocalDate"]
+  {"ofInstant" (fn [i zone] (l/local-date (zdt-ed (zoned-of-instant (inst/inst-nanos i) zone))))})
+(statics! ["LocalTime" "java.time.LocalTime"]
+  {"ofInstant" (fn [i zone] (l/local-time (zdt-nod (zoned-of-instant (inst/inst-nanos i) zone))))})
+
 ;; --- the deferred atZone / atOffset ------------------------------------------
 (__register-class-methods! :jolt.time/local-date-time
   {"atZone" (fn [x zone] (zoned-of-ldt x zone))
